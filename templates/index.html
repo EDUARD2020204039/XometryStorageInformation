@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xometry Offer Helper</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Xometry Offer Helper</h1>
+            <p>Gestionarea și analiza ofertelor Xometry</p>
+        </header>
+
+        <main>
+            <section class="offers-section">
+                <h2>Oferte disponibile</h2>
+                
+                {% if offers %}
+                    <div class="offers-grid">
+                        {% for offer in offers %}
+                        <div class="offer-card">
+                            <div class="offer-header">
+                                <h3>{{ offer.title or 'Fără titlu' }}</h3>
+                                <span class="offer-id">ID: {{ offer.offer_id }}</span>
+                            </div>
+                            
+                            <div class="offer-details">
+                                {% if offer.customer %}
+                                <p><strong>Client:</strong> {{ offer.customer }}</p>
+                                {% endif %}
+                                <p><strong>Repere:</strong> {{ offer.parts|length }}</p>
+                                <p><strong>Data creării:</strong> {{ offer.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                            </div>
+                            
+                            <div class="offer-actions">
+                                <a href="/offer/{{ offer.id }}" class="btn btn-primary">Vezi detalii</a>
+                                <a href="/export/{{ offer.id }}/csv" class="btn btn-secondary">Export CSV</a>
+                                <a href="/export/{{ offer.id }}/xlsx" class="btn btn-secondary">Export XLSX</a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="no-offers">
+                        <p>Nu există oferte în baza de date.</p>
+                        <p>Folosește scriptul <code>scrape_offer.py</code> pentru a adăuga oferte noi.</p>
+                    </div>
+                {% endif %}
+            </section>
+
+            <section class="usage-section">
+                <h2>Cum să folosești</h2>
+                <div class="usage-steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Scrapează o ofertă</h3>
+                            <p>Folosește scriptul pentru a extrage datele unei oferte Xometry:</p>
+                            <code>python scrape_offer.py "URL_OFERTA"</code>
+                        </div>
+                    </div>
+                    
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>Editează reperele</h3>
+                            <p>Accesează detaliile ofertei și introdu prețurile, discount-urile și lead time-urile.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>Exportă oferta</h3>
+                            <p>Descarcă oferta finală în format CSV sau XLSX pentru a o prezenta clientului.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2024 Xometry Offer Helper. Dezvoltat pentru gestionarea eficientă a ofertelor.</p>
+        </footer>
+    </div>
+
+    <script>
+        // Funcționalitate JavaScript pentru interacțiune
+        document.addEventListener('DOMContentLoaded', function() {
+            // Adaugă efecte hover pentru card-urile de oferte
+            const offerCards = document.querySelectorAll('.offer-card');
+            offerCards.forEach(card => {
+                card.addEventListener('mouseenter', function() {
+                    this.style.transform = 'translateY(-5px)';
+                });
+                
+                card.addEventListener('mouseleave', function() {
+                    this.style.transform = 'translateY(0)';
+                });
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Detalii Ofertă - {{ offer.offer_id }}</title>
+  <!-- Favicon (inline SVG, ușor de găsit în tab) -->
+  <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Cdefs%3E%3ClinearGradient id="g" x1="0" x2="1" y1="0" y2="1"%3E%3Cstop offset="0%25" stop-color="%23667eea"/%3E%3Cstop offset="100%25" stop-color="%23764ba2"/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect rx="14" ry="14" x="4" y="4" width="56" height="56" fill="url(%23g)"/%3E%3Ccircle cx="28" cy="28" r="12" fill="white" opacity="0.95"/%3E%3Cpath d="M41 41l10 10" stroke="white" stroke-width="5" stroke-linecap="round"/%3E%3C/svg%3E' />
+  <style>
+    :root{
+      --bg:#f4f6fb; --card:#ffffff; --text:#2c3e50; --muted:#6b7280; --brand1:#667eea; --brand2:#764ba2; --success:#27ae60; --line:#e9ecef;
+      --shadow:0 10px 30px rgba(0,0,0,.08);
+    }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;line-height:1.6;color:var(--text);background:var(--bg)}
+    a{color:inherit}
+
+    .container{max-width:1400px;margin:0 auto;padding:24px}
+
+    /* HEADER */
+    .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+    .home-btn{display:inline-flex;align-items:center;gap:10px;background:linear-gradient(135deg,var(--brand1),var(--brand2));color:#fff;padding:10px 16px;border-radius:999px;text-decoration:none;box-shadow:0 6px 18px rgba(102,126,234,.35);transition:.2s}
+    .home-btn:hover{transform:translateY(-1px)}
+    .home-btn svg{width:18px;height:18px}
+
+    .header{background:linear-gradient(135deg,var(--brand1),var(--brand2));color:#fff;padding:28px;border-radius:18px;margin-bottom:28px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+    .header:after{content:"";position:absolute;inset:-40% -20% auto auto;width:420px;height:420px;background:radial-gradient(transparent 45%, rgba(255,255,255,.15));transform:rotate(25deg)}
+    .header h1{font-size:32px;font-weight:700;display:flex;align-items:center;gap:12px}
+    .header h1 .icon{font-size:26px;}
+
+    .offer-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;margin-top:18px}
+    .offer-card{background:rgba(255,255,255,.15);padding:14px 16px;border-radius:14px;backdrop-filter:blur(8px)}
+    .offer-card strong{display:block;font-size:12px;opacity:.95;margin-bottom:6px}
+
+    /* PARTS */
+    .section{background:var(--card);border-radius:18px;padding:22px;box-shadow:var(--shadow);margin-bottom:24px}
+    .section h2{display:flex;align-items:center;gap:10px;color:var(--text);font-size:22px;border-bottom:3px solid var(--brand1);padding-bottom:10px}
+
+    .toolbar{display:flex;gap:10px;margin-top:14px}
+    .btn{border:none;border-radius:12px;padding:10px 14px;cursor:pointer;font-weight:600}
+    .btn-primary{background:linear-gradient(135deg,var(--brand1),var(--brand2));color:#fff}
+    .btn-ghost{background:#f1f4ff;color:#3949ab}
+
+    .table-wrap{overflow:auto;border-radius:14px;border:1px solid var(--line)}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th{background:linear-gradient(135deg,var(--brand1),var(--brand2));color:#fff;padding:14px 10px;text-align:left;font-weight:700;position:sticky;top:0}
+    th:first-child{border-top-left-radius:14px}
+    th:last-child{border-top-right-radius:14px}
+    td{padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+    tr:hover{background:#f8f9fc}
+    tr:nth-child(even){background:#fafbff}
+
+    .chip{display:inline-block;margin:2px 0;padding:3px 8px;background:#eef2ff;border-radius:999px;font-size:11px;color:#4338ca}
+    .qty{font-weight:700;color:var(--brand1);text-align:center}
+
+    input[type=number]{width:100px;padding:8px;border:2px solid #e9ecef;border-radius:10px;text-align:center;font-size:14px;transition:.15s}
+    input[type=number]:focus{outline:none;border-color:var(--brand1);box-shadow:0 0 0 3px rgba(102,126,234,.15)}
+    .price{font-weight:700;color:var(--success);text-align:center}
+
+    .actions{display:flex;gap:8px}
+
+    /* SUMMARY */
+    .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:14px}
+    .summary-item{background:linear-gradient(135deg,#f8f9fa,#eef2f7);padding:18px;border-radius:14px;border-left:4px solid var(--brand1);text-align:center}
+    .summary-item .value{font-size:28px;font-weight:800;color:var(--brand1)}
+    .total-value{font-size:32px;color:var(--success) !important}
+
+    /* NOTIF */
+    .notification{position:fixed;top:20px;right:20px;padding:14px 18px;border-radius:12px;color:#fff;font-weight:700;z-index:1000;animation:slideIn .3s ease-out;box-shadow:0 5px 20px rgba(0,0,0,.2)}
+    .notification-success{background:linear-gradient(135deg,#27ae60,#2ecc71)}
+    .notification-error{background:linear-gradient(135deg,#e74c3c,#c0392b)}
+    @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+    @media(max-width:768px){ .container{padding:14px} .header{padding:20px} .header h1{font-size:26px} input[type=number]{width:84px} }
+    /* --- Fix butoane & aliniere în tabel --- */
+  .parts-table td, .parts-table th { vertical-align: middle; }
+  .parts-table td:last-child { white-space: nowrap; }
+  .actions { display: flex; justify-content: center; align-items: center; }
+  .actions .btn { padding: 8px 12px; height: 36px; line-height: 20px; border-radius: 10px; box-shadow: none; }
+  input[type=number] { height: 36px; line-height: 36px; }
+  .btn-primary { box-shadow: 0 2px 8px rgba(102,126,234,.25); }
+  @media (max-width: 768px){ .actions .btn{height:34px;padding:6px 10px;border-radius:9px} input[type=number]{height:34px} }
+    /* ===== Revamp vizual: background & header mai estetic ===== */
+  body{background:
+      radial-gradient(1200px 800px at 10% -10%, rgba(102,126,234,.12), transparent 50%),
+      radial-gradient(900px 700px at 110% 20%, rgba(118,75,162,.10), transparent 50%),
+      var(--bg);
+  }
+  .header{position:relative; padding:44px; border-radius:26px; color:#fff; box-shadow: var(--shadow);
+    background:
+      radial-gradient(1200px 500px at -10% 0%, rgba(255,255,255,.15), transparent 60%),
+      radial-gradient(600px 300px at 120% 0%, rgba(255,255,255,.12), transparent 60%),
+      linear-gradient(135deg, var(--brand1), var(--brand2));
+  }
+  .header::before{content:""; position:absolute; inset:auto auto -30% -12%; width:420px; height:420px; border-radius:50%;
+    background:radial-gradient(circle at 30% 30%, rgba(255,255,255,.22), rgba(255,255,255,.06) 60%, transparent 62%);
+    filter: blur(0.2px); opacity:.55; transform:rotate(12deg);
+  }
+  .header::after{content:""; position:absolute; inset:-20% -15% auto auto; width:360px; height:360px; border-radius:24px;
+    background:radial-gradient(circle at 60% 40%, rgba(255,255,255,.18), rgba(255,255,255,.05) 60%, transparent 62%);
+    opacity:.5; transform:rotate(-15deg);
+  }
+  .offer-info .offer-card{background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.25)}
+  .home-btn{box-shadow:0 8px 24px rgba(102,126,234,.35)}
+
+  /* Tabel: header unitar, nuanțe netede */
+  .parts-table thead tr{background:linear-gradient(135deg, var(--brand1), var(--brand2));}
+  .parts-table th{background:transparent; color:#fff}
+  .parts-table thead th:first-child{border-top-left-radius:14px}
+  .parts-table thead th:last-child{border-top-right-radius:14px}
+
+  /* Buton Acțiuni – versiune soft */
+  .actions .btn{background:linear-gradient(135deg, rgba(102,126,234,.95), rgba(118,75,162,.95)); color:#fff}
+  .actions .btn:hover{filter:saturate(1.05) brightness(1.03)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <a class="home-btn" href="http://86.123.232.23:10000/" title="Acasă">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 10.5 12 3l9 7.5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Acasă</span>
+      </a>
+      <a href="/" style="color:var(--muted);text-decoration:none">&larr; Înapoi la lista oferte</a>
+    </div>
+
+    <div class="header">
+      <h1><span class="icon">&#128269;</span> Detalii Ofertă</h1>
+      <div class="offer-info">
+        <div class="offer-card"><strong>ID Ofertă:</strong><span>{{ offer.offer_id }}</span></div>
+        <div class="offer-card"><strong>Titlu:</strong><span>{{ offer.title or 'N/A' }}</span></div>
+        <div class="offer-card"><strong>Client:</strong><span>{{ offer.customer or 'N/A' }}</span></div>
+        <div class="offer-card"><strong>Data Creare:</strong><span>{{ offer.created_at.strftime('%d.%m.%Y %H:%M') if offer.created_at else 'N/A' }}</span></div>
+        <div class="offer-card"><strong>URL:</strong> <a href="{{ offer.url }}" target="_blank" style="color:#fff;text-decoration:underline;">Vezi oferta originală</a></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>&#128221; Repere ({{ parts|length }})</h2>
+      <div class="toolbar">
+        <a class="btn btn-ghost" href="/export/{{ offer.id }}/csv">Export CSV</a>
+        <a class="btn btn-ghost" href="/export/{{ offer.id }}/xlsx">Export XLSX</a>
+      </div>
+      <div class="table-wrap" style="margin-top:14px">
+        <table class="parts-table">
+          <thead>
+            <tr>
+              <th style="width: 22%;">img</th>
+              <th style="width: 22%;">Reper</th>
+              <th style="width: 16%;">Material</th>
+              <th style="width: 16%;">Procese</th>
+              <th style="width: 8%;">Cantitate</th>
+              <th style="width: 10%;">Preț Unitar (&euro;)</th>
+              <th style="width: 8%;">Discount (%)</th>
+              <th style="width: 10%;">Timp Livrare (zile)</th>
+              <th style="width: 10%;">Preț Total (&euro;)</th>
+              <th style="width: 6%;">Acțiuni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for part in parts %}
+            <tr data-part-id="{{ part.id }}">
+              <!-- ... existing code ... -->
+<td style="padding: 8px; text-align: left; color: #374151;">
+      {% if part.image_url %}
+        <img src="{{ part.image_url }}" alt="{{ part.name }}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 8px; cursor: pointer;" onclick="openImageModal('{{ part.image_url }}', '{{ part.name }}')">
+    {% else %}
+        <span style="color: #999;">N/A</span>
+    {% endif %}
+</td>
+<!-- ... existing code ... -->
+
+              <td class="part-name">{{ part.name or 'N/A' }}</td>
+              <td class="part-material">{{ part.material or 'N/A' }}</td>
+              <td class="part-processes"> {% if part.processes %}
+    {% for p in part.processes %}
+      <span>{{ p }}</span>
+    {% endfor %}
+  {% else %}
+    N/A
+  {% endif %}
+</td>
+              <td class="qty">{{ part.quantity or 1 }}</td>
+              <td><input type="number" class="price-input" value="{{ part.unit_price or 0.00 }}" step="0.01" min="0" placeholder="0.00" /></td>
+              <td><input type="number" class="discount-input" value="{{ part.discount or 0 }}" min="0" max="100" placeholder="0" /></td>
+              <td><input type="number" class="leadtime-input" value="{{ part.lead_time or '' }}" min="1" placeholder="zile" /></td>
+              <td class="price">{{ "%.2f"|format(part.total_price or 0.00) }} &euro;</td>
+              <td class="actions"><button class="btn btn-primary" onclick="savePart({{ part.id }})">Salvează</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>&#128176; Sumar Ofertă</h2>
+      <div class="summary-grid">
+        <div class="summary-item"><strong>Total Repere</strong><div class="value">{{ parts|length }}</div></div>
+        <div class="summary-item"><strong>Cantitate Totală</strong><div class="value">{{ parts|sum(attribute='quantity') or 0 }}</div></div>
+        <div class="summary-item"><strong>Valoare Totală</strong><div class="value total-value" id="total-value">0.00 &euro;</div></div>
+        <div class="summary-item"><strong>Repere cu Preț</strong><div class="value" id="priced-parts">0</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function(){
+      updateSummary();
+      document.querySelectorAll('.price-input, .discount-input').forEach(i=> i.addEventListener('input', function(){ updateTotalPrice(this); }));
+    });
+
+    function updateTotalPrice(input){
+      const row = input.closest('tr');
+      const up = row.querySelector('.price-input');
+      const disc = row.querySelector('.discount-input');
+      //const qtyCell = row.querySelector('td:nth-child(4)');
+      const qtyCell = row.querySelector('.qty'); // ai deja clasa asta pe celula
+      if(!up||!disc||!qtyCell) return;
+      const unit = parseFloat(up.value)||0; const d = parseFloat(disc.value)||0; const q = parseInt(qtyCell.textContent)||1;
+      const total = unit*q*(1 - d/100);
+      const cell = row.querySelector('.price');
+      if(cell) cell.textContent = (isNaN(total)?0:total).toFixed(2)+ ' €';
+      updateSummary();
+    }
+
+    function updateSummary(){
+      const rows = document.querySelectorAll('tbody tr');
+      let total = 0, priced = 0;
+      rows.forEach(r=>{ const t = parseFloat((r.querySelector('.price')?.textContent||'0').replace(' €',''))||0; if(t>0) priced++; total += t; });
+      const tv = document.getElementById('total-value'); const pp = document.getElementById('priced-parts');
+      if(tv) tv.textContent = total.toFixed(2) + ' €';
+      if(pp) pp.textContent = priced;
+    }
+
+    async function savePart(partId){
+      const row = document.querySelector(`tr[data-part-id="${partId}"]`);
+      const unitPrice = parseFloat(row.querySelector('.price-input').value) || null;
+      const discount = parseFloat(row.querySelector('.discount-input').value) || 0;
+      const leadTime = parseInt(row.querySelector('.leadtime-input').value) || null;
+      const btn = row.querySelector('button'); const txt = btn.textContent; btn.textContent='Salvez…'; btn.disabled=true;
+      try{
+        const fd = new FormData(); fd.append('part_id', partId); if(unitPrice!==null) fd.append('unit_price', unitPrice); fd.append('discount', discount); if(leadTime!==null) fd.append('lead_time', leadTime);
+        const resp = await fetch('/update_part', {method:'POST', body:fd});
+        if(resp.ok){ showNotification('Reperul a fost salvat!', 'success'); updateTotalPrice(row.querySelector('.price-input')); }
+        else{ throw new Error('Eroare la salvare'); }
+      }catch(e){ console.error(e); showNotification('Eroare la salvarea reperului!', 'error'); }
+      finally{ btn.textContent=txt; btn.disabled=false; }
+    }
+
+    function showNotification(message, type){
+      const n = document.createElement('div'); n.className = `notification notification-${type}`; n.textContent = message; document.body.appendChild(n); setTimeout(()=>n.remove(), 2800);
+    }
+
+
+  </script><div id="imageModal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.8);" onclick="if(event.target.id==='imageModal') closeImageModal()">
+  <div style="position:relative; margin:auto; padding:20px; width:auto; max-width:90%; top:50%; transform:translateY(-50%); text-align:center;">
+    <span onclick="closeImageModal()" style="position:absolute; top:10px; right:25px; color:white; font-size:35px; font-weight:bold; cursor:pointer;">&times;</span>
+    <img id="modalImage" src="" alt="" style="max-width:50%; max-height:80vh; display:block; margin:auto; border-radius:10px; object-fit:contain;">
+    <div id="modalCaption" style="text-align:center; color:white; margin-top:10px; font-size:18px;"></div>
+  </div>
+</div>
+
+<script>
+function openImageModal(imageUrl, partName){
+  const img = document.getElementById('modalImage');
+  img.src = imageUrl || '';
+  document.getElementById('modalCaption').textContent = partName || '';
+  document.getElementById('imageModal').style.display = 'block';
+  document.addEventListener('keydown', escClose);
+}
+function closeImageModal(){
+  document.getElementById('imageModal').style.display = 'none';
+  document.removeEventListener('keydown', escClose);
+}
+function escClose(e){ if(e.key === 'Escape') closeImageModal(); }
+</script>
+
+
+</body>
+
+</html>
+

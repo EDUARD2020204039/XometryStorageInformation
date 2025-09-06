@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.log
+dist/
+build/
+node_modules/
+chrome-extension/*.zip
+# artefacte diverse
+.DS_Store
