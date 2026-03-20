@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ro">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xometry Analysis Engine</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='/logo.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content" style="display: flex; align-items: center; gap: 20px;">
+                <img src="{{ url_for('static', path='/logo.png') }}" alt="Logo"
+                    style="height: 60px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                <h1>Xometry Analysis Engine</h1>
+                <div class="header-actions">
+                    <a href="/orders" class="btn btn-outline-success btn-sm me-2">
+                        <span class="btn-icon">📦</span>
+                        <span class="btn-text">Comenzi (PO)</span>
+                    </a>
+                    <a href="/help" class="btn btn-outline-primary btn-sm">
+                        <span class="btn-icon">❓</span>
+                        <span class="btn-text">Ajutor</span>
+                    </a>
+                    <a href="/documentation" class="btn btn-outline-secondary btn-sm">
+                        <span class="btn-icon">📚</span>
+                        <span class="btn-text">Documentație</span>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <!-- Câmp de căutare după job number -->
+            <div class="search-section">
+                <div class="search-header">
+                    <h2>🔍 Căutare Job Number</h2>
+                    <p>Caută oferte după numărul job-ului (J-1598697-274656 sau RFQ-1599624-40019)</p>
+                </div>
+                <div class="search-container">
+                    <div class="search-input-wrapper">
+                        <input type="text" id="jobSearch"
+                            placeholder="Introduceți job number (ex: 1598, J-1598697, RFQ-1599624)"
+                            class="search-input">
+                        <div class="search-icons">
+                            <span class="search-icon">🔍</span>
+                        </div>
+                    </div>
+                    <button id="searchBtn" class="btn btn-primary search-btn">
+                        <span class="btn-icon">🔍</span>
+                        <span class="btn-text">Caută</span>
+                    </button>
+                    <button id="clearSearch" class="btn btn-secondary clear-btn" style="display: none;">
+                        <span class="btn-icon">❌</span>
+                        <span class="btn-text">Șterge filtrele</span>
+                    </button>
+                </div>
+                <div id="searchResults" class="search-results"></div>
+            </div>
+    </div>
+
+    <section class="offers-section">
+        <h2>Oferte disponibile</h2>
+
+        {% if offers %}
+        <div class="offers-grid">
+            {% for offer in offers[:30] %}
+            <div class="offer-card" onclick="window.location.href='/offer/{{ offer.id }}'" style="cursor: pointer;">
+                <div class="offer-header">
+                    <h3>{{ offer.title or 'Fără titlu' }}</h3>
+                    <span class="offer-id">ID: {{ offer.offer_id }}</span>
+                </div>
+
+                <!-- Imaginea reperului -->
+                <div class="offer-image">
+                    {% set first_part_with_image = offer.parts | selectattr('local_image_path') | first %}
+                    {% if not first_part_with_image %}
+                    {% set first_part_with_image = offer.parts | selectattr('image_url') | first %}
+                    {% endif %}
+                    {% if first_part_with_image %}
+                    {% if first_part_with_image.local_image_path %}
+                    <img src="/static/{{ first_part_with_image.local_image_path }}"
+                        alt="{{ first_part_with_image.name }}" class="part-image"
+                        onclick="openImageModal('/static/{{ first_part_with_image.local_image_path }}', '{{ first_part_with_image.name }}')">
+                    {% else %}
+                    <img src="{{ first_part_with_image.image_url }}" alt="{{ first_part_with_image.name }}"
+                        class="part-image"
+                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                        onclick="openImageModal('{{ first_part_with_image.image_url }}', '{{ first_part_with_image.name }}')">
+                    <div class="expired-image-placeholder" style="display: none;">
+                        <span class="expired-image-icon">⏰</span>
+                        <span class="expired-image-text">Imagine expirată</span>
+                        <span class="expired-image-subtitle">{{ first_part_with_image.name }}</span>
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <div class="no-image-placeholder">
+                        <span class="no-image-icon">🔧</span>
+                        <span class="no-image-text">Fără imagine</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="offer-details">
+                    {% if offer.customer %}
+                    <p><strong>Client:</strong> {{ offer.customer }}</p>
+                    {% endif %}
+                    <p><strong>Repere:</strong> {{ offer.parts|length }}</p>
+                    {% if offer.dosar_id %}
+                    <p><strong>Dosar:</strong> <span style="color: #27ae60; font-weight: 600;">{{ offer.dosar_id
+                            }}</span></p>
+                    {% else %}
+                    <p><strong>Dosar:</strong> <span style="color: #e74c3c; font-style: italic;">Nu alocat</span></p>
+                    {% endif %}
+                    <p><strong>Data creării:</strong> {{ offer.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                </div>
+
+                <div class="offer-actions">
+                    <a href="/offer/{{ offer.id }}" class="btn btn-primary">Vezi detalii</a>
+                    <a href="/export/{{ offer.id }}/csv" class="btn btn-secondary">Export CSV</a>
+                    <a href="/export/{{ offer.id }}/xlsx" class="btn btn-secondary">Export XLSX</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% if offers|length > 30 %}
+        <div class="results-info">
+            <p
+                style="text-align: center; color: #6b7280; margin-top: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+                📊 Afișate primele 30 din {{ offers|length }} oferte. Folosește căutarea pentru a găsi oferte specifice.
+            </p>
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="no-offers">
+            <p>Nu există oferte în baza de date.</p>
+            <p>Folosește scriptul <code>scrape_offer.py</code> pentru a adăuga oferte noi.</p>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="extension-section">
+        <h2>Extensie Chrome</h2>
+        <div class="extension-card">
+            <div class="extension-info">
+                <h3>🚀 Extensie Chrome pentru Xometry</h3>
+                <p>Instalează extensia Chrome pentru a extrage automat datele ofertelor direct din browser-ul tău!</p>
+                <div class="extension-features">
+                    <ul>
+                        <li>✅ Extragere automată a datelor ofertelor</li>
+                        <li>✅ Salvarea directă în aplicația web</li>
+                        <li>✅ Interfață simplă și intuitivă</li>
+                        <li>✅ Compatibilă cu toate paginile Xometry</li>
+                    </ul>
+                </div>
+                <div class="extension-download">
+                    <a href="/static/xometry-extension-v1.4.24.zip" class="btn btn-primary btn-large"
+                        download="xometry-extension-v1.4.24.zip">
+                        📥 Descarcă Extensia Chrome v1.4.24
+                    </a>
+                    <p class="download-note">După download, extrage arhiva și instalează extensia în Chrome prin
+                        Developer Mode</p>
+                    <p class="download-note"><strong>v1.4.24:</strong> ↗ deschide APP folosind id-ul din răspuns (DB id)
+                    </p>
+                    <p class="download-note">Arhiva conține acum un folder <code>xometry-extension</code>. Extrage peste
+                        folderul deja încărcat în Chrome și apasă „Refresh”.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="usage-section">
+        <h2>Cum să folosești</h2>
+        <div class="usage-steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h3>Scrapează o ofertă</h3>
+                    <p>Folosește scriptul pentru a extrage datele unei oferte Xometry:</p>
+                    <code>python scrape_offer.py "URL_OFERTA"</code>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h3>Editează reperele</h3>
+                    <p>Accesează detaliile ofertei și introdu prețurile, discount-urile și lead time-urile.</p>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h3>Exportă oferta</h3>
+                    <p>Descarcă oferta finală în format CSV sau XLSX pentru a o prezenta clientului.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2024 Xometry Offer Helper. Dezvoltat pentru gestionarea eficientă a ofertelor.</p>
+    </footer>
+    </div>
+
+    <script>
+        // Flag pentru a preveni dublarea
+        if (!window.searchInitialized) {
+            window.searchInitialized = true;
+
+            // Funcționalitate JavaScript pentru interacțiune
+            document.addEventListener('DOMContentLoaded', function () {
+                // Adaugă efecte hover pentru card-urile de oferte
+                const offerCards = document.querySelectorAll('.offer-card');
+                offerCards.forEach(card => {
+                    card.addEventListener('mouseenter', function () {
+                        this.style.transform = 'translateY(-5px)';
+                    });
+
+                    card.addEventListener('mouseleave', function () {
+                        this.style.transform = 'translateY(0)';
+                    });
+                });
+
+                // Funcționalitate de căutare după job number
+                const searchInput = document.getElementById('jobSearch');
+                const searchBtn = document.getElementById('searchBtn');
+                const clearBtn = document.getElementById('clearSearch');
+                const searchResults = document.getElementById('searchResults');
+                const offersGrid = document.querySelector('.offers-grid');
+                const noOffers = document.querySelector('.no-offers');
+
+                // Funcție pentru căutare
+                function searchOffers() {
+                    const searchTerm = searchInput.value.trim().toLowerCase();
+
+                    if (!searchTerm) {
+                        // Afișează toate ofertele
+                        searchResults.classList.add('hidden');
+                        searchResults.innerHTML = '';
+                        if (offersGrid) offersGrid.style.display = 'grid';
+                        if (noOffers) noOffers.style.display = 'block';
+                        clearBtn.style.display = 'none';
+                        return;
+                    }
+
+                    // Caută în toate ofertele
+                    const allOffers = document.querySelectorAll('.offer-card');
+                    const matchingOffers = [];
+
+                    allOffers.forEach(card => {
+                        const offerId = card.querySelector('.offer-id').textContent.toLowerCase();
+                        const title = card.querySelector('h3').textContent.toLowerCase();
+
+                        // Caută în offer_id (J-1598697-274656 sau RFQ-1599624-40019)
+                        if (offerId.includes(searchTerm) || title.includes(searchTerm)) {
+                            matchingOffers.push(card.outerHTML);
+                        }
+                    });
+
+                    // Limitează la 30 de rezultate
+                    const limitedOffers = matchingOffers.slice(0, 30);
+
+                    // Afișează rezultatele
+                    if (limitedOffers.length > 0) {
+                        let resultsHTML = limitedOffers.join('');
+
+                        // Adaugă mesaj dacă sunt mai multe rezultate
+                        if (matchingOffers.length > 30) {
+                            resultsHTML += `<div style="text-align: center; color: #6b7280; margin-top: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            📊 Afișate primele 30 din ${matchingOffers.length} rezultate găsite.
+                        </div>`;
+                        }
+
+                        searchResults.innerHTML = resultsHTML;
+                        searchResults.classList.remove('hidden');
+                        if (offersGrid) offersGrid.style.display = 'none';
+                        if (noOffers) noOffers.style.display = 'none';
+                        clearBtn.style.display = 'inline-block';
+                    } else {
+                        searchResults.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 2rem;">Nu s-au găsit oferte care să conțină "' + searchTerm + '"</p>';
+                        searchResults.classList.remove('hidden');
+                        if (offersGrid) offersGrid.style.display = 'none';
+                        if (noOffers) noOffers.style.display = 'none';
+                        clearBtn.style.display = 'inline-block';
+                    }
+                }
+
+                // Event listeners - cu verificare pentru a preveni dublarea
+                if (!searchBtn.hasAttribute('data-listener-added')) {
+                    searchBtn.addEventListener('click', searchOffers);
+                    searchBtn.setAttribute('data-listener-added', 'true');
+                }
+
+                if (!clearBtn.hasAttribute('data-listener-added')) {
+                    clearBtn.addEventListener('click', function () {
+                        searchInput.value = '';
+                        searchResults.classList.add('hidden');
+                        searchResults.innerHTML = '';
+                        if (offersGrid) offersGrid.style.display = 'grid';
+                        if (noOffers) noOffers.style.display = 'block';
+                        clearBtn.style.display = 'none';
+                    });
+                    clearBtn.setAttribute('data-listener-added', 'true');
+                }
+
+                // Căutare la Enter
+                if (!searchInput.hasAttribute('data-keypress-listener-added')) {
+                    searchInput.addEventListener('keypress', function (e) {
+                        if (e.key === 'Enter') {
+                            searchOffers();
+                        }
+                    });
+                    searchInput.setAttribute('data-keypress-listener-added', 'true');
+                }
+
+                // Căutare în timp real (opțional)
+                if (!searchInput.hasAttribute('data-input-listener-added')) {
+                    searchInput.addEventListener('input', function () {
+                        if (this.value.length >= 3) {
+                            searchOffers();
+                        } else if (this.value.length === 0) {
+                            searchResults.classList.add('hidden');
+                            searchResults.innerHTML = '';
+                            if (offersGrid) offersGrid.style.display = 'grid';
+                            if (noOffers) noOffers.style.display = 'block';
+                            clearBtn.style.display = 'none';
+                        }
+                    });
+                    searchInput.setAttribute('data-input-listener-added', 'true');
+                }
+            });
+        } // End of searchInitialized flag
+
+        // Funcție pentru deschiderea imaginii în modal
+        function openImageModal(imageUrl, partName) {
+            // Creează modal-ul dacă nu există
+            let modal = document.getElementById('imageModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'imageModal';
+                modal.className = 'image-modal';
+                modal.innerHTML = `
+                    <div class="modal-content">
+                        <span class="close">&times;</span>
+                        <img id="modalImage" src="" alt="">
+                        <div class="modal-caption"></div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                // Event listeners pentru modal
+                modal.querySelector('.close').onclick = function () {
+                    modal.style.display = 'none';
+                }
+
+                modal.onclick = function (event) {
+                    if (event.target === modal) {
+                        modal.style.display = 'none';
+                    }
+                }
+            }
+
+            // Actualizează conținutul modal-ului
+            modal.querySelector('#modalImage').src = imageUrl;
+            modal.querySelector('#modalImage').alt = partName;
+            modal.querySelector('.modal-caption').textContent = partName;
+            modal.style.display = 'block';
+        }
+    </script>
+</body>
+
+</html>

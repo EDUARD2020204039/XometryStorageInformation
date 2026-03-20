@@ -1,0 +1,9 @@
+.env
+.env.*
+venv/
+__pycache__/
+*.pyc
+*.log
+data/
+login_debug.html
+login_debug.png

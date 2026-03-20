@@ -1,12 +1,24 @@
-.venv/
-__pycache__/
-*.pyc
-.env
-.env.*
-*.log
-dist/
-build/
-node_modules/
-chrome-extension/*.zip
-# artefacte diverse
+# Root monorepo ignores
 .DS_Store
+
+# xometry_bot runtime and secrets
+xometry_bot/.env
+xometry_bot/.env.*
+xometry_bot/venv/
+xometry_bot/__pycache__/
+xometry_bot/*.pyc
+xometry_bot/*.log
+xometry_bot/data/
+xometry_bot/login_debug.html
+xometry_bot/login_debug.png
+
+# xometry-app runtime and generated assets
+xometry-app/*.log
+xometry-app/*.log.*
+xometry-app/*.out
+xometry-app/*.bak_*
+xometry-app/exports/
+xometry-app/static/devize/
+xometry-app/static/docs/
+xometry-app/static/images/
+xometry-app/static/*.zip

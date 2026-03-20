@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  build-app:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,9 +22,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push app image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./xometry-app
+          file: ./xometry-app/Dockerfile
           push: true
           tags: ghcr.io/eduard2020204039/xometrystorageinformation:latest
