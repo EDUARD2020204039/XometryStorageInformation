@@ -1,5 +1,8 @@
 # Root monorepo ignores
 .DS_Store
+.env
+.env.*
+!.env.example
 
 # xometry_bot runtime and secrets
 xometry_bot/.env

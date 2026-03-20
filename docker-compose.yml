@@ -1,0 +1,50 @@
+services:
+  xometry-app:
+    image: ghcr.io/eduard2020204039/xometrystorageinformation:latest
+    restart: unless-stopped
+    ports:
+      - "10000:10000"
+    environment:
+      PORT: "10000"
+      DATABASE_URL: "sqlite:////app/data/xometry_offers.db"
+    volumes:
+      - app_data:/app/data
+      - app_images:/app/static/images
+      - app_docs:/app/static/docs
+      - app_devize:/app/static/devize
+      - app_exports:/app/exports
+
+  xometrybot-scraper:
+    image: ghcr.io/eduard2020204039/xometrybot-scraper:latest
+    restart: unless-stopped
+    depends_on:
+      - xometry-app
+    environment:
+      BOT_ENTRYPOINT: main.py
+      BACKEND_URL: "http://xometry-app:10000"
+    env_file:
+      - xometry_bot/.env
+    volumes:
+      - bot_data:/app/data
+
+  xometrybot-telegram:
+    image: ghcr.io/eduard2020204039/xometrybot-telegram:latest
+    restart: unless-stopped
+    depends_on:
+      - xometry-app
+      - xometrybot-scraper
+    environment:
+      BOT_ENTRYPOINT: bot_app.py
+      BACKEND_URL: "http://xometry-app:10000"
+    env_file:
+      - xometry_bot/.env
+    volumes:
+      - bot_data:/app/data
+
+volumes:
+  app_data:
+  app_images:
+  app_docs:
+  app_devize:
+  app_exports:
+  bot_data:

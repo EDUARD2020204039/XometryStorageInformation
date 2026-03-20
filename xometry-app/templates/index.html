@@ -137,7 +137,7 @@
         {% else %}
         <div class="no-offers">
             <p>Nu există oferte în baza de date.</p>
-            <p>Folosește scriptul <code>scrape_offer.py</code> pentru a adăuga oferte noi.</p>
+            <p>Pornește serviciul <code>xometrybot-scraper</code> sau extensia Chrome pentru a adăuga oferte noi.</p>
         </div>
         {% endif %}
     </section>
@@ -178,9 +178,9 @@
             <div class="step">
                 <div class="step-number">1</div>
                 <div class="step-content">
-                    <h3>Scrapează o ofertă</h3>
-                    <p>Folosește scriptul pentru a extrage datele unei oferte Xometry:</p>
-                    <code>python scrape_offer.py "URL_OFERTA"</code>
+                    <h3>Pornește colectarea ofertelor</h3>
+                    <p>Rulează serviciul <code>xometrybot-scraper</code> sau folosește extensia Chrome pentru a trimite oferte în aplicație.</p>
+                    <code>docker compose up -d xometrybot-scraper</code>
                 </div>
             </div>
 
