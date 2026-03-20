@@ -29,3 +29,57 @@ jobs:
           file: ./xometry-app/Dockerfile
           push: true
           tags: ghcr.io/eduard2020204039/xometrystorageinformation:latest
+
+  build-bot-scraper:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push bot scraper image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./xometry_bot
+          file: ./xometry_bot/Dockerfile
+          build-args: |
+            BOT_ENTRYPOINT=main.py
+          push: true
+          tags: ghcr.io/eduard2020204039/xometrybot-scraper:latest
+
+  build-bot-telegram:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push bot telegram image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./xometry_bot
+          file: ./xometry_bot/Dockerfile
+          build-args: |
+            BOT_ENTRYPOINT=bot_app.py
+          push: true
+          tags: ghcr.io/eduard2020204039/xometrybot-telegram:latest
