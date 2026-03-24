@@ -25,6 +25,11 @@ bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
 
 DATA_FILE = "data/all_jobs.json"
 TELEGRAM_MSG_LIMIT = 3800
+FORCE_SCRAPE_FLAG = "data/force_scrape.flag"
+TELEGRAM_POLL_LOCK = "data/telegram_polling.lock"
+TELEGRAM_POLL_LOCK_TTL = 90
+TELEGRAM_POLL_HEARTBEAT = 15
+INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
 
 JOB_OFFERS_REFUSE_MUTATION = """mutation jobOffersRefuse($id: ID!, $responseRefusalReason: String) {
   jobOffersRefuse(input: {id: $id, responseRefusalReason: $responseRefusalReason}) {
@@ -273,8 +278,70 @@ def send_markdown_message(chat_id, text, reply_markup=None):
         )
         first = False
 
+def _ensure_data_dir():
+    os.makedirs("data", exist_ok=True)
 
-import subprocess
+
+def _write_force_scrape_flag():
+    _ensure_data_dir()
+    payload = {
+        "requested_at": time.time(),
+        "requested_by": INSTANCE_ID,
+    }
+    with open(FORCE_SCRAPE_FLAG, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def _read_poll_lock():
+    if not os.path.exists(TELEGRAM_POLL_LOCK):
+        return None
+    try:
+        with open(TELEGRAM_POLL_LOCK, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _write_poll_lock():
+    _ensure_data_dir()
+    payload = {
+        "instance_id": INSTANCE_ID,
+        "timestamp": time.time(),
+    }
+    with open(TELEGRAM_POLL_LOCK, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def _acquire_polling_lock():
+    lock_data = _read_poll_lock()
+    if lock_data:
+        last_seen = float(lock_data.get("timestamp", 0) or 0)
+        other_instance = str(lock_data.get("instance_id", "") or "")
+        if other_instance and other_instance != INSTANCE_ID and (time.time() - last_seen) < TELEGRAM_POLL_LOCK_TTL:
+            return False, other_instance, max(0, TELEGRAM_POLL_LOCK_TTL - (time.time() - last_seen))
+    _write_poll_lock()
+    return True, None, 0
+
+
+def _poll_lock_heartbeat():
+    while True:
+        try:
+            lock_data = _read_poll_lock()
+            if lock_data and lock_data.get("instance_id") not in (None, "", INSTANCE_ID):
+                return
+            _write_poll_lock()
+        except Exception as e:
+            print(f"Polling lock heartbeat failed: {e}")
+        time.sleep(TELEGRAM_POLL_HEARTBEAT)
+
+
+def _release_polling_lock():
+    try:
+        lock_data = _read_poll_lock()
+        if lock_data and lock_data.get("instance_id") == INSTANCE_ID and os.path.exists(TELEGRAM_POLL_LOCK):
+            os.remove(TELEGRAM_POLL_LOCK)
+    except Exception as e:
+        print(f"Polling lock release failed: {e}")
 
 def main_menu_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -433,6 +500,21 @@ def button_scrape_handler(message):
 def button_sync_orders_handler(message):
     trigger_orders_sync(message)
 
+def trigger_scrape(message):
+    bot.send_message(
+        message.chat.id,
+        "Scraping manual pornit. Trimit trigger-ul catre containerul scraper.",
+        reply_markup=main_menu_keyboard(),
+    )
+    try:
+        _write_force_scrape_flag()
+        bot.send_message(
+            message.chat.id,
+            "Trigger trimis catre scraper. Daca /app/data este volum comun, ruleaza imediat fara PM2.",
+        )
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Eroare la trigger scrape: {e}")
+
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("decline:"))
 def handle_decline_callback(call):
     chat_id = str(call.message.chat.id)
@@ -489,7 +571,30 @@ if __name__ == "__main__":
         print(f"Startup msg loop failed: {e}")
 
     print("Starting infinity polling...")
-    # restart_on_change=True allows it to recover from some errors, though usually for file changes. 
+    acquired, owner, wait_seconds = _acquire_polling_lock()
+    if not acquired:
+        print(
+            "Another Telegram polling instance is active "
+            f"({owner}). Waiting instead of starting getUpdates polling."
+        )
+        while True:
+            sleep_for = min(
+                TELEGRAM_POLL_HEARTBEAT,
+                max(5, int(wait_seconds) if wait_seconds else TELEGRAM_POLL_HEARTBEAT),
+            )
+            time.sleep(sleep_for)
+            acquired, owner, wait_seconds = _acquire_polling_lock()
+            if acquired:
+                break
+            print(
+                "Polling lock still owned by another instance "
+                f"({owner}); retrying in {int(max(1, wait_seconds))}s."
+            )
+
+    heartbeat_thread = threading.Thread(target=_poll_lock_heartbeat, daemon=True)
+    heartbeat_thread.start()
+
+    # restart_on_change=True allows it to recover from some errors, though usually for file changes.
     # timeout=25 default is 20. long_polling_timeout=20 default is 20.
     # We increase them slightly to match server latency.
     while True:
@@ -513,6 +618,7 @@ def shutdown_handler(signum, frame):
         print("Shutdown message sent.")
     except Exception as e:
         print(f"Failed to send shutdown msg: {e}")
+    _release_polling_lock()
     sys.exit(0)
 
 # Register signals

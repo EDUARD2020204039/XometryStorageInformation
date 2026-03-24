@@ -11,6 +11,9 @@ import filter
 import notifier
 import backend
 
+FORCE_SCRAPE_FLAG = os.path.join("data", "force_scrape.flag")
+FORCE_SCRAPE_POLL_INTERVAL = 5
+
 # Configure logging
 logger = logging.getLogger('xometry_bot')
 logger.setLevel(logging.INFO)
@@ -28,6 +31,29 @@ if not logger.handlers:
     fh = logging.FileHandler('bot.log')
     fh.setFormatter(formatter)
     logger.addHandler(fh)
+
+
+def _consume_force_scrape_flag():
+    if not os.path.exists(FORCE_SCRAPE_FLAG):
+        return False
+    try:
+        os.remove(FORCE_SCRAPE_FLAG)
+        logger.info("Consumed manual force-scrape trigger from shared volume.")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to consume force-scrape trigger: {e}")
+        return False
+
+
+def _sleep_until_next_iteration(sleep_time):
+    remaining = max(0, float(sleep_time))
+    while remaining > 0:
+        if _consume_force_scrape_flag():
+            logger.info("Manual force-scrape trigger detected. Starting next iteration early.")
+            return
+        chunk = min(FORCE_SCRAPE_POLL_INTERVAL, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
 
 def run_iteration():
     """
@@ -250,16 +276,17 @@ def run_iteration():
 
 def main():
     logger.info("Starting Xometry Bot (Stable Mode)...")
-    
+    _consume_force_scrape_flag()
+
     while True:
         start_time = time.time()
         run_iteration()
-        
+
         elapsed = time.time() - start_time
         sleep_time = max(0, config.CHECK_INTERVAL - elapsed)
-        
+
         logger.info(f"Iteration took {elapsed:.1f}s. Sleeping for {sleep_time:.1f}s...")
-        time.sleep(sleep_time)
+        _sleep_until_next_iteration(sleep_time)
 
 if __name__ == "__main__":
     main()
