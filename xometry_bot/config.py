@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 
 # App Version
-BOT_VERSION = "1.5.1"
+BOT_VERSION = "1.52"
 
 load_dotenv(override=True)
 
