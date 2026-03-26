@@ -13,6 +13,7 @@ from playwright.sync_api import sync_playwright
 import auth
 import scraper
 import backend
+import browser_utils
 
 def allowed_gai_family():
     return socket.AF_INET
@@ -45,13 +46,8 @@ JOB_OFFERS_REFUSE_MUTATION = """mutation jobOffersRefuse($id: ID!, $responseRefu
 def _get_auth_token():
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=config.HEADLESS,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+            browser = browser_utils.launch_browser(p.chromium)
+            context = browser_utils.new_context(browser)
             page = context.new_page()
             auth.login(page)
             page.wait_for_selector("text=Job Board", timeout=20000)
@@ -407,13 +403,8 @@ def trigger_scrape_command(message):
 def _run_orders_sync(chat_id):
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=config.HEADLESS,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+            browser = browser_utils.launch_browser(p.chromium)
+            context = browser_utils.new_context(browser)
             page = context.new_page()
             details_page = context.new_page()
             auth.login(page)

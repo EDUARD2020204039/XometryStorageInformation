@@ -10,6 +10,7 @@ import scraper
 import filter
 import notifier
 import backend
+import browser_utils
 
 FORCE_SCRAPE_FLAG = os.path.join("data", "force_scrape.flag")
 FORCE_SCRAPE_POLL_INTERVAL = 5
@@ -132,17 +133,16 @@ def run_iteration():
             pass
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=config.HEADLESS,
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
-        )
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
-        details_page = context.new_page()
-        
+        browser = None
+        context = None
+        page = None
+        details_page = None
         try:
+            browser = browser_utils.launch_browser(p.chromium, logger=logger)
+            context = browser_utils.new_context(browser)
+            page = context.new_page()
+            details_page = context.new_page()
+
             # 1. Login
             auth.login(page)
             
@@ -266,11 +266,18 @@ def run_iteration():
             logger.error(f"Error during iteration: {e}")
         finally:
             try:
-                details_page.close()
+                if context:
+                    context.close()
             except Exception:
                 pass
             try:
-                browser.close()
+                if details_page:
+                    details_page.close()
+            except Exception:
+                pass
+            try:
+                if browser:
+                    browser.close()
             except Exception as e:
                 logger.warning(f"Browser close skipped: {e}")
 
@@ -280,7 +287,12 @@ def main():
 
     while True:
         start_time = time.time()
-        run_iteration()
+        try:
+            run_iteration()
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            logger.exception("Unhandled iteration failure. Keeping process alive for next cycle.")
 
         elapsed = time.time() - start_time
         sleep_time = max(0, config.CHECK_INTERVAL - elapsed)

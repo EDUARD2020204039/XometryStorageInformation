@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 
 # App Version
-BOT_VERSION = "1.52"
+BOT_VERSION = "1.53"
 
 load_dotenv(override=True)
 
@@ -29,6 +29,14 @@ CHECK_INTERVAL = 120  # Check every 2 minutes
 
 # Browser Config
 HEADLESS = True  # Set to True for production/background run
+BROWSER_USER_AGENT = os.getenv(
+    "BROWSER_USER_AGENT",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+)
+PLAYWRIGHT_BROWSER_CHANNEL = os.getenv("PLAYWRIGHT_BROWSER_CHANNEL", "chromium")
+PLAYWRIGHT_LAUNCH_RETRIES = int(os.getenv("PLAYWRIGHT_LAUNCH_RETRIES", "2"))
+PLAYWRIGHT_LAUNCH_RETRY_DELAY = float(os.getenv("PLAYWRIGHT_LAUNCH_RETRY_DELAY", "3"))
 
 # Backend (data sink)
 BACKEND_URL = os.getenv("BACKEND_URL", "http://86.123.232.23:10000")
