@@ -70,7 +70,7 @@
             {% for offer in offers[:30] %}
             <div class="offer-card" onclick="window.location.href='/offer/{{ offer.id }}'" style="cursor: pointer;">
                 <div class="offer-header">
-                    <h3>{{ offer.title or 'Fără titlu' }}</h3>
+                    <h3>{{ offer.normalized_title or offer.title or 'Fără titlu' }}</h3>
                     <span class="offer-id">ID: {{ offer.offer_id }}</span>
                 </div>
 

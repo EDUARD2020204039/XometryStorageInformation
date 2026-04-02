@@ -159,6 +159,139 @@ def _join_unique(values):
             uniq.append(v)
     return ", ".join(uniq) if uniq else "Unknown"
 
+
+CANONICAL_JOB_ID_RE = re.compile(r"\bJ-\d+(?:-\d+)?\b", re.IGNORECASE)
+CANONICAL_RFQ_ID_RE = re.compile(r"\bRFQ-\d+(?:-\d+)?\b", re.IGNORECASE)
+
+
+def _extract_canonical_job_id(text):
+    if not text:
+        return None
+    match = CANONICAL_JOB_ID_RE.search(text)
+    if match:
+        return match.group(0).upper()
+    match = CANONICAL_RFQ_ID_RE.search(text)
+    if match:
+        return match.group(0).upper()
+    return None
+
+
+def _is_canonical_job_id(job_id):
+    return bool(_extract_canonical_job_id(job_id))
+
+
+def _build_offer_link(offer_id=None, job_id=None, prefer_job_id=False):
+    canonical_job_id = _extract_canonical_job_id(job_id)
+    if prefer_job_id and canonical_job_id:
+        if canonical_job_id.startswith("RFQ-"):
+            return f"https://partner.xometry.eu/rfqs/{canonical_job_id}"
+        return f"https://partner.xometry.eu/offers/{canonical_job_id}"
+
+    if offer_id:
+        return f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
+
+    if canonical_job_id:
+        if canonical_job_id.startswith("RFQ-"):
+            return f"https://partner.xometry.eu/rfqs/{canonical_job_id}"
+        return f"https://partner.xometry.eu/offers/{canonical_job_id}"
+
+    job_id = (job_id or "").strip()
+    if job_id and job_id != "Unknown":
+        return f"https://partner.xometry.eu/offers/{job_id}"
+    return ""
+
+
+def _extract_offer_display_id_from_page(page: Page):
+    candidates = []
+
+    try:
+        candidates.append(page.title())
+    except Exception:
+        pass
+
+    try:
+        h1 = page.locator("h1").first
+        if h1.count() > 0:
+            candidates.append(h1.inner_text().strip())
+    except Exception:
+        pass
+
+    try:
+        body_text = page.evaluate(
+            "() => document.body ? (document.body.innerText || '') : ''"
+        )
+        candidates.append(body_text)
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        resolved = _extract_canonical_job_id(candidate)
+        if resolved:
+            return resolved
+    return None
+
+
+def _needs_offer_identity_resolution(job):
+    job_id = str(job.get("id") or "").strip()
+    if not job_id or job_id == "Unknown":
+        return bool(job.get("offer_id"))
+    return not _is_canonical_job_id(job_id)
+
+
+def _resolve_offer_identity_from_page(page: Page, job):
+    url = job.get("link") or _build_offer_link(
+        offer_id=job.get("offer_id"),
+        job_id=job.get("id"),
+    )
+    if not url:
+        return None
+
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    except Exception as e:
+        logger.warning(f"Offer identity resolution failed for {url}: {e}")
+        return None
+
+    resolved_job_id = _extract_offer_display_id_from_page(page)
+    if not resolved_job_id:
+        return None
+
+    return {
+        "id": resolved_job_id,
+        "link": _build_offer_link(
+            offer_id=job.get("offer_id"),
+            job_id=resolved_job_id,
+            prefer_job_id=True,
+        ),
+    }
+
+
+def _normalize_api_jobs(page: Page, jobs):
+    suspicious_jobs = [job for job in jobs if _needs_offer_identity_resolution(job)]
+    if not suspicious_jobs:
+        return jobs
+
+    logger.info(
+        f"Resolving canonical job ids for {len(suspicious_jobs)} offers with non-standard ids..."
+    )
+
+    for job in suspicious_jobs:
+        original_id = job.get("id")
+        resolved = _resolve_offer_identity_from_page(page, job)
+        if not resolved:
+            continue
+
+        job["id"] = resolved["id"]
+        if resolved.get("link"):
+            job["link"] = resolved["link"]
+
+        if original_id != resolved["id"]:
+            logger.info(f"Resolved job id {original_id} -> {resolved['id']}")
+
+        time.sleep(0.5)
+
+    return jobs
+
 def _jobs_from_gsh_offers(offers, job_type_label):
     jobs = []
     for offer in offers:
@@ -183,10 +316,7 @@ def _jobs_from_gsh_offers(offers, job_type_label):
                 materials.append(pos.get("material"))
                 part = pos.get("part") or {}
                 processes.append(part.get("processType"))
-            if offer_id:
-                link = f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
-            elif job_id != "Unknown":
-                link = f"https://partner.xometry.eu/offers/{job_id}"
+            link = _build_offer_link(offer_id=offer_id, job_id=job_id)
         elif otype == "JobOffer":
             job_id = offer.get("code") or "Unknown"
             money = offer.get("cost") or {}
@@ -197,10 +327,7 @@ def _jobs_from_gsh_offers(offers, job_type_label):
                 quantity += int(part.get("quantity") or 0)
                 materials.append(part.get("material"))
                 processes.append(part.get("processType"))
-            if offer_id:
-                link = f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
-            elif job_id != "Unknown":
-                link = f"https://partner.xometry.eu/offers/{job_id}"
+            link = _build_offer_link(offer_id=offer_id, job_id=job_id)
 
         material = _join_unique(materials)
         process = _join_unique(processes)
@@ -366,6 +493,7 @@ def scrape_all_via_api(page: Page):
         logger.error(f"API scrape failed: {e}")
         return None
 
+    _normalize_api_jobs(page, all_jobs)
     return all_jobs
 
 
@@ -705,12 +833,19 @@ def build_offer_payload(page: Page, job):
     if job.get("id", "").startswith("RFQ-"):
         return None
 
-    url = job.get("link") or f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
+    url = job.get("link") or _build_offer_link(offer_id=offer_id, job_id=job.get("id"))
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
     except Exception as e:
         logger.error(f"Offer page load failed for {offer_id}: {e}")
         return None
+
+    resolved_job_id = _extract_offer_display_id_from_page(page) or job.get("id") or ""
+    canonical_link = _build_offer_link(
+        offer_id=offer_id,
+        job_id=resolved_job_id,
+        prefer_job_id=bool(_extract_canonical_job_id(resolved_job_id)),
+    )
 
     parts = _extract_parts_from_page(page)
     fallbacks = _extract_part_fallbacks(page)
@@ -743,8 +878,8 @@ def build_offer_payload(page: Page, job):
     parts_pricing = [{"part_index": i, "price_per_unit": 0} for i in range(len(parts))]
     payload = {
         "offer_id": str(offer_id),
-        "title": job.get("id") or "",
-        "url": url,
+        "title": resolved_job_id,
+        "url": canonical_link or url,
         "parts": parts,
         "parts_pricing": parts_pricing,
         "total_price": 0,

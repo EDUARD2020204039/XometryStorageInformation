@@ -429,7 +429,7 @@
       <h1><span class="icon">&#128269;</span> Detalii Ofertă</h1>
       <div class="offer-info">
         <div class="offer-card"><strong>ID Ofertă:</strong><span>{{ offer.offer_id }}</span></div>
-        <div class="offer-card"><strong>Titlu:</strong><span>{{ offer.title or 'N/A' }}</span></div>
+        <div class="offer-card"><strong>Titlu:</strong><span>{{ offer.normalized_title or offer.title or 'N/A' }}</span></div>
         <div class="offer-card">
           <strong>Observații:</strong>
           <textarea 

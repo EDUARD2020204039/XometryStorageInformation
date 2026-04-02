@@ -276,6 +276,40 @@ def _safe_slug(text: str) -> str:
     s = re.sub(r"[^A-Za-z0-9._-]+", "_", s)
     return s[:80] if len(s) > 0 else 'reper'
 
+
+def _extract_canonical_offer_title(text: Optional[str]) -> Optional[str]:
+    if not text:
+        return None
+
+    match = re.search(r"\b(J-\d+(?:-\d+)?)\b", text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+
+    match = re.search(r"\b(RFQ-\d+(?:-\d+)?)\b", text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+
+    return None
+
+
+def _normalize_offer_title(
+    raw_title: Optional[str],
+    offer_external_id: Optional[str] = None,
+    offer_url: Optional[str] = None,
+) -> str:
+    canonical = _extract_canonical_offer_title(raw_title) or _extract_canonical_offer_title(offer_url)
+    if canonical:
+        return canonical
+
+    cleaned = (raw_title or "").strip()
+    if cleaned.upper().startswith("HJO-") and offer_external_id:
+        return str(offer_external_id)
+
+    if cleaned:
+        return cleaned
+
+    return str(offer_external_id or "")
+
 def _find_deviz_template() -> Optional[Path]:
     root = Path(__file__).resolve().parent
     candidates = [
@@ -414,6 +448,8 @@ async def index(request: Request, db: Session = Depends(get_db)):
     try:
         # Obține toate ofertele
         offers = db.query(Offer).order_by(Offer.created_at.desc()).all()
+        for offer in offers:
+            offer.normalized_title = _normalize_offer_title(offer.title, offer.offer_id, offer.url)
         
         return templates.TemplateResponse("index.html", {
             "request": request,
@@ -527,6 +563,7 @@ async def offer_detail(request: Request, offer_id: int, db: Session = Depends(ge
         offer = db.query(Offer).filter(Offer.id == offer_id).first()
         if not offer:
             raise HTTPException(status_code=404, detail="Oferta nu a fost găsită")
+        offer.normalized_title = _normalize_offer_title(offer.title, offer.offer_id, offer.url)
             
         # Obține reperele
         parts = db.query(Part).filter(Part.offer_id == offer_id).all()
@@ -822,7 +859,7 @@ async def get_offers(db: Session = Depends(get_db)):
         return [{
             'id': offer.id,
             'offer_id': offer.offer_id,
-            'title': offer.title,
+            'title': _normalize_offer_title(offer.title, offer.offer_id, offer.url),
             'customer': offer.customer,
             'url': offer.url,
             'created_at': offer.created_at.isoformat(),
@@ -908,6 +945,11 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
         offer_data = await request.json()
         offer_external_id = offer_data.get("offer_id") if isinstance(offer_data, dict) else None
         offer_url = offer_data.get("url") if isinstance(offer_data, dict) else None
+        normalized_title = _normalize_offer_title(
+            offer_data.get("title") if isinstance(offer_data, dict) else None,
+            offer_external_id,
+            offer_url,
+        )
         
         logger.info(f"Primit date de la extensie pentru oferta: {offer_external_id}")
 
@@ -919,7 +961,7 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
         
         if existing_offer:
             logger.info(f"Oferta {offer_external_id} există deja, actualizez")
-            existing_offer.title = offer_data.get('title')
+            existing_offer.title = normalized_title
             existing_offer.customer = offer_data.get('customer')
             existing_offer.url = offer_url
             offer_id = existing_offer.id
@@ -928,7 +970,7 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
             offer = Offer(
                 offer_id=offer_external_id,
                 url=offer_url,
-                title=offer_data.get('title'),
+                title=normalized_title,
                 customer=offer_data.get('customer')
             )
             db.add(offer)
