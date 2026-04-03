@@ -180,7 +180,12 @@ def _is_canonical_job_id(job_id):
     return bool(_extract_canonical_job_id(job_id))
 
 
+def _is_gsh_job_id(job_id):
+    return str(job_id or "").strip().upper().startswith("HJO-")
+
+
 def _build_offer_link(offer_id=None, job_id=None, prefer_job_id=False):
+    is_gsh_job = _is_gsh_job_id(job_id)
     canonical_job_id = _extract_canonical_job_id(job_id)
     if prefer_job_id and canonical_job_id:
         if canonical_job_id.startswith("RFQ-"):
@@ -188,6 +193,8 @@ def _build_offer_link(offer_id=None, job_id=None, prefer_job_id=False):
         return f"https://partner.xometry.eu/offers/{canonical_job_id}"
 
     if offer_id:
+        if is_gsh_job:
+            return f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
         return f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
 
     if canonical_job_id:
@@ -235,6 +242,8 @@ def _needs_offer_identity_resolution(job):
     job_id = str(job.get("id") or "").strip()
     if not job_id or job_id == "Unknown":
         return bool(job.get("offer_id"))
+    if _is_gsh_job_id(job_id):
+        return False
     return not _is_canonical_job_id(job_id)
 
 

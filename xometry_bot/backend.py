@@ -25,7 +25,10 @@ def send_to_backend(jobs):
             continue
         if job_id and str(job_id).startswith("RFQ-"):
             continue
-        url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
+        if job_id and str(job_id).startswith("HJO-"):
+            url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
+        else:
+            url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
         offers.append({
             "offer_id": str(offer_id),
             "title": job_id,
