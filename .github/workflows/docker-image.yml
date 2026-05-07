@@ -28,7 +28,7 @@ jobs:
           context: ./xometry-app
           file: ./xometry-app/Dockerfile
           push: true
-          tags: ghcr.io/eduard2020204039/xometrystorageinformation:latest
+          tags: ghcr.io/unraidg5/xometrystorageinformation:latest
 
   build-bot-scraper:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
           build-args: |
             BOT_ENTRYPOINT=main.py
           push: true
-          tags: ghcr.io/eduard2020204039/xometrybot-scraper:latest
+          tags: ghcr.io/unraidg5/xometrybot-scraper:latest
 
   build-bot-telegram:
     runs-on: ubuntu-latest
@@ -82,4 +82,4 @@ jobs:
           build-args: |
             BOT_ENTRYPOINT=bot_app.py
           push: true
-          tags: ghcr.io/eduard2020204039/xometrybot-telegram:latest
+          tags: ghcr.io/unraidg5/xometrybot-telegram:latest
