@@ -1,6 +1,6 @@
 services:
   xometry-app:
-    image: ghcr.io/eduard2020204039/xometrystorageinformation:latest
+    image: ghcr.io/unraidg5/xometrystorageinformation:latest
     restart: unless-stopped
     ports:
       - "10000:10000"
@@ -15,7 +15,7 @@ services:
       - app_exports:/app/exports
 
   xometrybot-scraper:
-    image: ghcr.io/eduard2020204039/xometrybot-scraper:latest
+    image: ghcr.io/unraidg5/xometrybot-scraper:latest
     restart: unless-stopped
     depends_on:
       - xometry-app
@@ -28,7 +28,7 @@ services:
       - bot_data:/app/data
 
   xometrybot-telegram:
-    image: ghcr.io/eduard2020204039/xometrybot-telegram:latest
+    image: ghcr.io/unraidg5/xometrybot-telegram:latest
     restart: unless-stopped
     depends_on:
       - xometry-app

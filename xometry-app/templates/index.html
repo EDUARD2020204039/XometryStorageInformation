@@ -38,12 +38,12 @@
             <div class="search-section">
                 <div class="search-header">
                     <h2>🔍 Căutare Job Number</h2>
-                    <p>Caută oferte după numărul job-ului (J-1598697-274656 sau RFQ-1599624-40019)</p>
+                    <p>Caută oferte după numărul job-ului (J-1598697-274656, RFQ-1599624-40019 sau HJO-918-96)</p>
                 </div>
                 <div class="search-container">
                     <div class="search-input-wrapper">
                         <input type="text" id="jobSearch"
-                            placeholder="Introduceți job number (ex: 1598, J-1598697, RFQ-1599624)"
+                            placeholder="Introduceți job number (ex: 1598, J-1598697, RFQ-1599624, HJO-918)"
                             class="search-input">
                         <div class="search-icons">
                             <span class="search-icon">🔍</span>
@@ -236,11 +236,69 @@
                 const noOffers = document.querySelector('.no-offers');
 
                 // Funcție pentru căutare
-                function searchOffers() {
+                let allOffersCache = null;
+
+                function escapeHtml(value) {
+                    return String(value || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+                }
+
+                function formatOfferDate(value) {
+                    if (!value) return '-';
+                    const date = new Date(value);
+                    if (Number.isNaN(date.getTime())) return value;
+                    return date.toLocaleString('ro-RO');
+                }
+
+                async function fetchAllOffers() {
+                    if (allOffersCache) {
+                        return allOffersCache;
+                    }
+
+                    const response = await fetch('/api/offers');
+                    if (!response.ok) {
+                        throw new Error('Nu s-au putut incarca ofertele.');
+                    }
+
+                    allOffersCache = await response.json();
+                    return allOffersCache;
+                }
+
+                function renderSearchCards(offers, totalMatches) {
+                    const cardsHtml = offers.map(offer => `
+                        <div class="offer-card" onclick="window.location.href='/offer/${offer.id}'" style="cursor: pointer;">
+                            <div class="offer-header">
+                                <h3>${escapeHtml(offer.title || 'Fara titlu')}</h3>
+                                <span class="offer-id">ID: ${escapeHtml(offer.offer_id)}</span>
+                            </div>
+                            <div class="offer-details">
+                                ${offer.customer ? `<p><strong>Client:</strong> ${escapeHtml(offer.customer)}</p>` : ''}
+                                <p><strong>Repere:</strong> ${Number(offer.parts_count || 0)}</p>
+                                <p><strong>Data crearii:</strong> ${escapeHtml(formatOfferDate(offer.created_at))}</p>
+                            </div>
+                            <div class="offer-actions">
+                                <a href="/offer/${offer.id}" class="btn btn-primary">Vezi detalii</a>
+                            </div>
+                        </div>
+                    `).join('');
+
+                    if (totalMatches > offers.length) {
+                        return cardsHtml + `<div style="text-align: center; color: #6b7280; margin-top: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            Afisate primele ${offers.length} din ${totalMatches} rezultate gasite.
+                        </div>`;
+                    }
+
+                    return cardsHtml;
+                }
+
+                async function searchOffers() {
                     const searchTerm = searchInput.value.trim().toLowerCase();
 
                     if (!searchTerm) {
-                        // Afișează toate ofertele
                         searchResults.classList.add('hidden');
                         searchResults.innerHTML = '';
                         if (offersGrid) offersGrid.style.display = 'grid';
@@ -249,41 +307,30 @@
                         return;
                     }
 
-                    // Caută în toate ofertele
-                    const allOffers = document.querySelectorAll('.offer-card');
-                    const matchingOffers = [];
+                    try {
+                        const allOffers = await fetchAllOffers();
+                        const matchingOffers = allOffers.filter(offer => {
+                            const offerId = String(offer.offer_id || '').toLowerCase();
+                            const title = String(offer.title || '').toLowerCase();
+                            const customer = String(offer.customer || '').toLowerCase();
+                            return offerId.includes(searchTerm) || title.includes(searchTerm) || customer.includes(searchTerm);
+                        });
 
-                    allOffers.forEach(card => {
-                        const offerId = card.querySelector('.offer-id').textContent.toLowerCase();
-                        const title = card.querySelector('h3').textContent.toLowerCase();
+                        const limitedOffers = matchingOffers.slice(0, 30);
 
-                        // Caută în offer_id (J-1598697-274656 sau RFQ-1599624-40019)
-                        if (offerId.includes(searchTerm) || title.includes(searchTerm)) {
-                            matchingOffers.push(card.outerHTML);
-                        }
-                    });
-
-                    // Limitează la 30 de rezultate
-                    const limitedOffers = matchingOffers.slice(0, 30);
-
-                    // Afișează rezultatele
-                    if (limitedOffers.length > 0) {
-                        let resultsHTML = limitedOffers.join('');
-
-                        // Adaugă mesaj dacă sunt mai multe rezultate
-                        if (matchingOffers.length > 30) {
-                            resultsHTML += `<div style="text-align: center; color: #6b7280; margin-top: 1rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
-                            📊 Afișate primele 30 din ${matchingOffers.length} rezultate găsite.
-                        </div>`;
+                        if (limitedOffers.length > 0) {
+                            searchResults.innerHTML = renderSearchCards(limitedOffers, matchingOffers.length);
+                        } else {
+                            searchResults.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 2rem;">Nu s-au gasit oferte care sa contina "' + escapeHtml(searchTerm) + '"</p>';
                         }
 
-                        searchResults.innerHTML = resultsHTML;
                         searchResults.classList.remove('hidden');
                         if (offersGrid) offersGrid.style.display = 'none';
                         if (noOffers) noOffers.style.display = 'none';
                         clearBtn.style.display = 'inline-block';
-                    } else {
-                        searchResults.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 2rem;">Nu s-au găsit oferte care să conțină "' + searchTerm + '"</p>';
+                    } catch (error) {
+                        console.error('Eroare la cautare:', error);
+                        searchResults.innerHTML = '<p style="text-align: center; color: #ef4444; padding: 2rem;">Eroare la incarcarea ofertelor pentru cautare.</p>';
                         searchResults.classList.remove('hidden');
                         if (offersGrid) offersGrid.style.display = 'none';
                         if (noOffers) noOffers.style.display = 'none';

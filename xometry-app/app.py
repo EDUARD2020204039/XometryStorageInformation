@@ -289,6 +289,10 @@ def _extract_canonical_offer_title(text: Optional[str]) -> Optional[str]:
     if match:
         return match.group(1).upper()
 
+    match = re.search(r"\b(HJO-\d+(?:-\d+)?)\b", text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+
     return None
 
 
@@ -302,9 +306,6 @@ def _normalize_offer_title(
         return canonical
 
     cleaned = (raw_title or "").strip()
-    if cleaned.upper().startswith("HJO-") and offer_external_id:
-        return str(offer_external_id)
-
     if cleaned:
         return cleaned
 
