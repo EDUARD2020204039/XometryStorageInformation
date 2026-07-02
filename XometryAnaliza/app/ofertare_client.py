@@ -19,7 +19,7 @@ def run_ofertare_automata(job: dict[str, Any]) -> dict[str, Any]:
     response = requests.post(
         f"{settings.OFERTARE_AUTOMATA_URL}/api/offers",
         json=payload,
-        timeout=settings.OFERTARE_AUTOMATA_TIMEOUT,
+        timeout=(settings.OFERTARE_AUTOMATA_CONNECT_TIMEOUT, settings.OFERTARE_AUTOMATA_READ_TIMEOUT),
     )
     response.raise_for_status()
     return response.json()
