@@ -18,11 +18,32 @@ def is_interesting(job):
     if price_val < config.MIN_PRICE_VALUE:
         return False
 
-    # Check material OR process
     process = job.get('process', '').lower()
+    target_keywords = [
+        "cnc",
+        "milling",
+        "turning",
+        "machining",
+        "metal sheet",
+        "sheet metal",
+        "sheet",
+        "tabla",
+        "tablă",
+        "laser cutting",
+        "laser",
+        "bending",
+        "stainless steel",
+        "stainless",
+        "inox",
+        "304",
+        "316",
+        "1.4301",
+        "1.4404",
+    ]
+    haystack = f"{material} {process}"
     
-    match_material = any(keyword in material for keyword in config.INTERESTING_MATERIAL_KEYWORDS)
-    match_process = any(keyword in process for keyword in config.INTERESTING_MATERIAL_KEYWORDS)
+    match_material = any(keyword in haystack for keyword in target_keywords)
+    match_process = match_material
     
     if not (match_material or match_process):
         return False

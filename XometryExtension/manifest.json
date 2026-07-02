@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Xometry Price Calculator",
+  "version": "2.52",
+  "description": "Injects price calculation fields into Xometry Partner Portal job cards.",
+  "icons": {
+    "128": "icon.png"
+  },
+  "permissions": [
+    "storage",
+    "declarativeNetRequest",
+    "downloads"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ruleset_1",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "host_permissions": [
+    "https://partner.xometry.eu/*",
+    "http://86.123.232.23:2222/*",
+    "http://127.0.0.1:3333/*",
+    "http://86.123.232.23:10000/*",
+    "http://192.168.2.23:4468/*",
+    "http://86.123.232.23:4468/*",
+    "http://127.0.0.1:4468/*",
+    "ws://86.123.232.23:10000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://partner.xometry.eu/*"
+      ],
+      "js": [
+        "content_v20.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}

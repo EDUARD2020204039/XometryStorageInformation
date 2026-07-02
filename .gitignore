@@ -3,6 +3,9 @@
 .env
 .env.*
 !.env.example
+.edge-xometry-profile/
+__pycache__/
+*.pyc
 
 # xometry_bot runtime and secrets
 xometry_bot/.env

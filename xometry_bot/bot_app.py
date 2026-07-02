@@ -14,6 +14,7 @@ import auth
 import scraper
 import backend
 import browser_utils
+import agent_client
 
 def allowed_gai_family():
     return socket.AF_INET
@@ -398,6 +399,30 @@ def send_status(message):
 @bot.message_handler(commands=['scrape'])
 def trigger_scrape_command(message):
     trigger_scrape(message)
+
+
+@bot.message_handler(commands=['agentlogs'])
+def send_agent_logs(message):
+    ok, err, logs = agent_client.fetch_logs(limit=15)
+    if not ok:
+        bot.send_message(message.chat.id, f"Eroare agent logs: {err}", reply_markup=main_menu_keyboard())
+        return
+    if not logs:
+        bot.send_message(message.chat.id, "Nu exista loguri XometryAnaliza inca.", reply_markup=main_menu_keyboard())
+        return
+
+    lines = ["*XometryAnaliza logs*"]
+    for item in logs:
+        ts = item.get("ts")
+        if ts:
+            try:
+                stamp = datetime.fromtimestamp(float(ts)).strftime("%d.%m %H:%M:%S")
+            except Exception:
+                stamp = "?"
+        else:
+            stamp = "?"
+        lines.append(f"`{stamp}` {item.get('type', '')}: {item.get('message', '')}")
+    send_markdown_message(message.chat.id, "\n".join(lines), reply_markup=main_menu_keyboard())
 
 
 def _run_orders_sync(chat_id):

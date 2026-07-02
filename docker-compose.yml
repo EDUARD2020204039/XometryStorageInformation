@@ -1,4 +1,21 @@
 services:
+  xometryanaliza:
+    build:
+      context: ./XometryAnaliza
+    image: xometryanaliza:local
+    restart: unless-stopped
+    env_file:
+      - xometry_bot/.env
+    environment:
+      PORT: "4468"
+      OFERTARE_AUTOMATA_URL: "http://192.168.2.26:8585"
+      OFERTARE_AUTOMATA_ROOT: "X:\\"
+      TELEGRAM_ENABLED: "true"
+    ports:
+      - "4468:4468"
+    volumes:
+      - xometryanaliza_data:/app/data
+
   xometry-app:
     image: ghcr.io/unraidg5/xometrystorageinformation:latest
     restart: unless-stopped
@@ -15,27 +32,37 @@ services:
       - app_exports:/app/exports
 
   xometrybot-scraper:
-    image: ghcr.io/unraidg5/xometrybot-scraper:latest
+    build:
+      context: ./xometry_bot
+    image: xometrybot-scraper:local
     restart: unless-stopped
     depends_on:
       - xometry-app
+      - xometryanaliza
     environment:
       BOT_ENTRYPOINT: main.py
       BACKEND_URL: "http://xometry-app:10000"
+      AGENT_URL: "http://xometryanaliza:4468"
+      AGENT_TIMEOUT: "10"
     env_file:
       - xometry_bot/.env
     volumes:
       - bot_data:/app/data
 
   xometrybot-telegram:
-    image: ghcr.io/unraidg5/xometrybot-telegram:latest
+    build:
+      context: ./xometry_bot
+    image: xometrybot-telegram:local
     restart: unless-stopped
     depends_on:
       - xometry-app
       - xometrybot-scraper
+      - xometryanaliza
     environment:
       BOT_ENTRYPOINT: bot_app.py
       BACKEND_URL: "http://xometry-app:10000"
+      AGENT_URL: "http://xometryanaliza:4468"
+      AGENT_TIMEOUT: "10"
     env_file:
       - xometry_bot/.env
     volumes:
@@ -48,3 +75,4 @@ volumes:
   app_devize:
   app_exports:
   bot_data:
+  xometryanaliza_data:

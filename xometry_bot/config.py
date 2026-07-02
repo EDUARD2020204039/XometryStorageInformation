@@ -45,6 +45,10 @@ BACKEND_API_KEY = os.getenv("BACKEND_API_KEY", "")
 BACKEND_RESEND_EXISTING = os.getenv("BACKEND_RESEND_EXISTING", "false").lower() in ("1", "true", "yes")
 BACKEND_MAX_OFFERS_PER_RUN = int(os.getenv("BACKEND_MAX_OFFERS_PER_RUN", "10"))
 
+# XometryAnaliza agent service
+AGENT_URL = os.getenv("AGENT_URL", "http://xometryanaliza:4468")
+AGENT_TIMEOUT = int(os.getenv("AGENT_TIMEOUT", "10"))
+
 # Orders deep sync
 ORDERS_SYNC_ENABLED = os.getenv("ORDERS_SYNC_ENABLED", "true").lower() in ("1", "true", "yes")
 ORDERS_SYNC_INTERVAL = int(os.getenv("ORDERS_SYNC_INTERVAL", "600"))  # 10 minutes

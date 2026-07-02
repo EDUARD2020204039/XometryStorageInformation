@@ -11,6 +11,7 @@ import filter
 import notifier
 import backend
 import browser_utils
+import agent_client
 
 FORCE_SCRAPE_FLAG = os.path.join("data", "force_scrape.flag")
 FORCE_SCRAPE_POLL_INTERVAL = 5
@@ -160,6 +161,12 @@ def run_iteration():
                 json.dump(jobs, f, indent=4)
             logger.info(f"Saved {len(jobs)} jobs to data/all_jobs.json")
 
+            agent_ok, agent_info = agent_client.submit_jobs(jobs, source="scraper")
+            if agent_ok:
+                logger.info(f"Submitted jobs to XometryAnaliza agents: {agent_info}")
+            else:
+                logger.error(f"Failed to submit jobs to XometryAnaliza agents: {agent_info}")
+
             existing_offer_ids = backend.fetch_existing_offer_ids()
             synced_offer_ids = backend.load_synced_offer_ids()
             if config.BACKEND_RESEND_EXISTING:
@@ -205,7 +212,6 @@ def run_iteration():
                     material_safe = escape_html(job['material'])
                     process_safe = escape_html(job['process'])
                     price_safe = escape_html(job['price'])
-                    
                     reply_markup = None
                     offer_id = job.get("offer_id")
                     if offer_id:

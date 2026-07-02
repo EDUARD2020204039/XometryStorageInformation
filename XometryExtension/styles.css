@@ -1,0 +1,145 @@
+/* Container for the injected price row */
+.xom-price-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background-color: #f6ffed;
+  /* Light green tint to distinguish */
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.xom-price-row label {
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+/* Input field styling */
+.xom-price-input {
+  padding: 4px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  width: 100px;
+  transition: all 0.3s;
+  font-size: 14px;
+}
+
+.xom-price-input:focus,
+.xom-obs-input:focus {
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+  outline: none;
+}
+
+/* Observations input styling */
+.xom-obs-input {
+  padding: 4px 8px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  width: 100%;
+  min-width: 200px;
+  /* Expand to fill flex parent */
+  transition: all 0.3s;
+  font-size: 14px;
+}
+
+/* Line total display */
+.xom-line-total {
+  font-weight: bold;
+  color: #1890ff;
+  /* Ant Design Blue */
+  margin-left: auto;
+  /* Push to right */
+  font-size: 14px;
+}
+
+/* Grand Total fixed box */
+.xom-grand-total-box {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: white;
+  padding: 16px 24px;
+  border-radius: 8px;
+  box-shadow: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08), 0 9px 28px 8px rgba(0, 0, 0, 0.05);
+  z-index: 10000;
+  border: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 200px;
+}
+
+.xom-grand-total-label {
+  font-size: 12px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.xom-grand-total-value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #52c41a;
+  /* Ant Design Green */
+  margin-top: 4px;
+}
+
+.xom-parts-count {
+  font-size: 12px;
+  color: #bfbfbf;
+  margin-top: 4px;
+}
+
+/* Animation for updates */
+@keyframes flash-update {
+  0% {
+    background-color: #e6f7ff;
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+.xom-updated {
+  animation: flash-update 1s ease-out;
+}
+
+/* Minimized State */
+.xom-minimized-placeholder {
+  display: none;
+  font-size: 14px;
+  font-weight: bold;
+  color: #52c41a;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.xom-grand-total-box.xom-minimized {
+  width: auto;
+  height: auto;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 24px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  background: white;
+}
+
+.xom-grand-total-box.xom-minimized .xom-grand-total-label,
+.xom-grand-total-box.xom-minimized #xom-grand-total-content {
+  display: none !important;
+}
+
+.xom-grand-total-box.xom-minimized .xom-minimized-placeholder {
+  display: block;
+}
