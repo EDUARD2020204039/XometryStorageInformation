@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from . import settings
 from .ofertare_client import extract_geo_items, run_ofertare_automata
 from .store import append_event, load_job_state, save_job_state
 from .telegram_log import send_log
@@ -59,7 +60,8 @@ class SheetMetalLaserAgent:
         job_id = _job_id(job)
         offer_id = str(job.get("offer_id") or "")
         previous = load_job_state(job_id) or {}
-        previous_geo = previous.get("sheet_metal_laser", {}).get("geo_items") or []
+        previous_sheet = previous.get("sheet_metal_laser") or {}
+        previous_geo = previous_sheet.get("geo_items") or []
         if previous_geo:
             append_event("sheet.geo.cached", f"Sheet agent already has GEO for {job_id}", job_id=job_id, offer_id=offer_id)
             return {
@@ -68,8 +70,37 @@ class SheetMetalLaserAgent:
                 "geo_items": previous_geo,
             }
 
+        last_attempt_ts = previous_sheet.get("completed_ts") or previous_sheet.get("started_ts") or 0
+        if last_attempt_ts and time.time() - float(last_attempt_ts) < settings.SHEET_AGENT_RETRY_SECONDS:
+            retry_after = max(0, int(settings.SHEET_AGENT_RETRY_SECONDS - (time.time() - float(last_attempt_ts))))
+            append_event("sheet.skip_recent", f"Sheet agent skipped recent attempt for {job_id}", job_id=job_id, offer_id=offer_id, retry_after_seconds=retry_after)
+            return {
+                **previous_sheet,
+                "agent": self.name,
+                "skipped": True,
+                "retry_after_seconds": retry_after,
+            }
+
+        started_ts = time.time()
+        running_state = {
+            "agent": self.name,
+            "status": "running",
+            "started_ts": started_ts,
+            "url": job.get("link") or job.get("url"),
+        }
+        save_job_state(
+            job_id,
+            {
+                **previous,
+                "job_id": job_id,
+                "job": job,
+                "offer_id": offer_id,
+                self.name: running_state,
+            },
+        )
         append_event("sheet.start", f"Sheet agent started unfold for {job_id}", job_id=job_id, offer_id=offer_id, url=job.get("link") or job.get("url"))
-        send_log(f"XometryAnaliza: SheetMetal/Laser agent pornit pentru {job_id}. Generez desfasurata GEO.")
+        if settings.TELEGRAM_SHEET_START_LOGS:
+            send_log(f"XometryAnaliza: SheetMetal/Laser agent pornit pentru {job_id}. Generez desfasurata GEO.")
 
         try:
             result = run_ofertare_automata(job)
@@ -83,11 +114,9 @@ class SheetMetalLaserAgent:
                 "completed_ts": time.time(),
             }
             append_event("sheet.done", f"Sheet agent finished {job_id}: {status}", job_id=job_id, offer_id=offer_id, geo_items=geo_items)
-            if geo_items:
+            if geo_items and settings.TELEGRAM_GEO_LOGS:
                 first_geo = geo_items[0].get("target_path")
                 send_log(f"XometryAnaliza: GEO pentru {job_id}: {first_geo}")
-            else:
-                send_log(f"XometryAnaliza: SheetMetal/Laser pentru {job_id} terminat, dar fara GEO in raspuns.")
             return output
         except Exception as exc:
             output = {
@@ -97,7 +126,8 @@ class SheetMetalLaserAgent:
                 "completed_ts": time.time(),
             }
             append_event("sheet.failed", f"Sheet agent failed {job_id}: {output['error']}", job_id=job_id, offer_id=offer_id)
-            send_log(f"XometryAnaliza: EROARE SheetMetal/Laser pentru {job_id}: {output['error']}")
+            if settings.TELEGRAM_SHEET_FAILURE_LOGS:
+                send_log(f"XometryAnaliza: EROARE SheetMetal/Laser pentru {job_id}: {output['error']}")
             return output
 
 
