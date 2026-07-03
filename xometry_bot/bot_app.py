@@ -403,7 +403,7 @@ def trigger_scrape_command(message):
 
 @bot.message_handler(commands=['agentlogs'])
 def send_agent_logs(message):
-    ok, err, logs = agent_client.fetch_logs(limit=15)
+    ok, err, logs = agent_client.fetch_logs(limit=12)
     if not ok:
         bot.send_message(message.chat.id, f"Eroare agent logs: {err}", reply_markup=main_menu_keyboard())
         return
@@ -411,7 +411,7 @@ def send_agent_logs(message):
         bot.send_message(message.chat.id, "Nu exista loguri XometryAnaliza inca.", reply_markup=main_menu_keyboard())
         return
 
-    lines = ["*XometryAnaliza logs*"]
+    lines = ["XometryAnaliza logs"]
     for item in logs:
         ts = item.get("ts")
         if ts:
@@ -421,8 +421,11 @@ def send_agent_logs(message):
                 stamp = "?"
         else:
             stamp = "?"
-        lines.append(f"`{stamp}` {item.get('type', '')}: {item.get('message', '')}")
-    send_markdown_message(message.chat.id, "\n".join(lines), reply_markup=main_menu_keyboard())
+        message_text = str(item.get("message", ""))
+        if len(message_text) > 180:
+            message_text = message_text[:177] + "..."
+        lines.append(f"{stamp} {item.get('type', '')}: {message_text}")
+    bot.send_message(message.chat.id, "\n".join(lines), reply_markup=main_menu_keyboard())
 
 
 def _run_orders_sync(chat_id):
