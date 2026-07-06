@@ -59,6 +59,7 @@ class SheetMetalLaserAgent:
     def run(self, job: dict[str, Any]) -> dict[str, Any]:
         job_id = _job_id(job)
         offer_id = str(job.get("offer_id") or "")
+        url = str(job.get("link") or job.get("url") or "")
         previous = load_job_state(job_id) or {}
         previous_sheet = previous.get("sheet_metal_laser") or {}
         previous_geo = previous_sheet.get("geo_items") or []
@@ -68,6 +69,18 @@ class SheetMetalLaserAgent:
                 "agent": self.name,
                 "status": "cached",
                 "geo_items": previous_geo,
+            }
+
+        is_rfq_without_offer = job_id.upper().startswith("RFQ-") and (not offer_id or "/rfqs/" in url)
+        if is_rfq_without_offer:
+            message = "RFQ sheet/laser job skipped: no Xometry offer page/files available for automatic GEO extraction."
+            append_event("sheet.skip_rfq", f"{message} {job_id}", job_id=job_id, offer_id=offer_id, url=url)
+            return {
+                "agent": self.name,
+                "status": "skipped_rfq",
+                "reason": message,
+                "url": url,
+                "completed_ts": time.time(),
             }
 
         last_attempt_ts = previous_sheet.get("completed_ts") or previous_sheet.get("started_ts") or 0
@@ -86,7 +99,7 @@ class SheetMetalLaserAgent:
             "agent": self.name,
             "status": "running",
             "started_ts": started_ts,
-            "url": job.get("link") or job.get("url"),
+            "url": url,
         }
         save_job_state(
             job_id,
@@ -98,7 +111,7 @@ class SheetMetalLaserAgent:
                 self.name: running_state,
             },
         )
-        append_event("sheet.start", f"Sheet agent started unfold for {job_id}", job_id=job_id, offer_id=offer_id, url=job.get("link") or job.get("url"))
+        append_event("sheet.start", f"Sheet agent started unfold for {job_id}", job_id=job_id, offer_id=offer_id, url=url)
         if settings.TELEGRAM_SHEET_START_LOGS:
             send_log(f"XometryAnaliza: SheetMetal/Laser agent pornit pentru {job_id}. Generez desfasurata GEO.")
 
