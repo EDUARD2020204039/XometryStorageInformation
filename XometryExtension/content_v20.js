@@ -2,13 +2,16 @@
 // Content Script v20 - Thickness Normalization
 
 (function () {
+    let latestAgentGeoStatus = null;
+    let latestAgentGeoSource = null;
+
     function log(msg) {
         // Log to browser console so user can see it
         console.log("%c[XomExt] " + msg, "color: #1890ff; font-weight: bold;");
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.51 Loaded (content_v20.js)");
+    log("Extension v2.53 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -44,7 +47,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.52</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.53</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -158,6 +161,9 @@
 
         // Inject Analysis Control
         injectAnalysisControl(card, partId);
+        if (latestAgentGeoStatus) {
+            injectGeoControl(card, latestAgentGeoStatus, latestAgentGeoSource, offerId, partId);
+        }
     }
 
     function processCalculations(card, text, partId, offerId) {
@@ -545,6 +551,93 @@
         }
     }
 
+    function textForGeoMatch(item) {
+        return [
+            item?.part_name,
+            item?.partName,
+            item?.target_path,
+            item?.targetPath,
+            item?.reason,
+            item?.status
+        ].filter(Boolean).join(' ').toLowerCase();
+    }
+
+    function partNameFromCard(card) {
+        const text = card.innerText || '';
+        const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+        const partIdIndex = lines.findIndex(line => line.includes('Part ID:'));
+        if (partIdIndex > 0) return lines[partIdIndex - 1];
+        const strong = card.querySelector('strong, b, .ant-typography-strong');
+        return strong ? strong.innerText.trim() : '';
+    }
+
+    function findGeoItemForPart(items, card, partId) {
+        const indexed = (items || [])
+            .map((item, index) => ({ item, index }))
+            .filter(entry => entry.item && (entry.item.target_path || entry.item.targetPath));
+
+        if (!indexed.length) return null;
+
+        const tokens = [partId, `part${partId}`, `part-${partId}`, `part_${partId}`]
+            .filter(Boolean)
+            .map(token => String(token).toLowerCase());
+        const byPartId = indexed.find(entry => {
+            const text = textForGeoMatch(entry.item);
+            return tokens.some(token => text.includes(token));
+        });
+        if (byPartId) return byPartId;
+
+        const partName = partNameFromCard(card).toLowerCase();
+        if (partName && partName !== 'n/a') {
+            const cleanName = partName.replace(/\.[a-z0-9]+$/i, '');
+            const byName = indexed.find(entry => {
+                const text = textForGeoMatch(entry.item);
+                return text.includes(partName) || (cleanName.length > 3 && text.includes(cleanName));
+            });
+            if (byName) return byName;
+        }
+
+        return indexed.length === 1 ? indexed[0] : null;
+    }
+
+    function injectGeoControl(card, geoStatus, agentSource, offerId, partId) {
+        let row = card.querySelector('.xom-geo-row');
+        const matched = findGeoItemForPart(geoStatus?.geo_items || [], card, partId);
+        const targetPath = matched?.item?.target_path || matched?.item?.targetPath;
+        const geoExists = matched?.item?.geo_exists;
+
+        if (!matched || !targetPath || geoExists === false || !agentSource || !offerId || offerId === 'unknown') {
+            if (row) row.remove();
+            return;
+        }
+
+        if (!row) {
+            row = document.createElement('div');
+            row.className = 'xom-geo-row';
+            const analyzeRow = card.querySelector('.xom-analyze-row');
+            if (analyzeRow) {
+                analyzeRow.parentNode.insertBefore(row, analyzeRow.nextSibling);
+            } else {
+                const priceRow = card.querySelector('.xom-price-row');
+                if (priceRow) card.insertBefore(row, priceRow);
+                else card.appendChild(row);
+            }
+        }
+
+        const url = `${agentSource.replace(/\/$/, '')}/api/agents/geo/${encodeURIComponent(offerId)}/files/${matched.index}`;
+        const fileName = targetPath.split(/[\\/]/).pop() || 'part.geo';
+        row.innerHTML = '';
+
+        const link = document.createElement('a');
+        link.className = 'xom-geo-btn';
+        link.href = url;
+        link.target = '_blank';
+        link.download = fileName;
+        link.textContent = `GEO: ${fileName}`;
+        link.title = targetPath;
+        row.appendChild(link);
+    }
+
     function injectCopyDimButton(card, dimText, l, w, rawL, rawW) {
         if (card.querySelector('.xom-copy-dim-btn')) return;
 
@@ -818,9 +911,11 @@
             setTimeout(() => { if (status) status.remove(); }, 5000);
         },
 
-        showAgentGeo: function (geoStatus) {
+        showAgentGeo: function (geoStatus, agentSource) {
             const container = document.getElementById('xom-backend-container');
             if (!container || !geoStatus) return;
+            latestAgentGeoStatus = geoStatus;
+            latestAgentGeoSource = agentSource || latestAgentGeoSource;
 
             let badge = document.getElementById('xom-agent-geo');
             if (!badge) {
@@ -857,6 +952,14 @@
                 badge.style.color = '#595959';
                 badge.style.border = '1px solid #d9d9d9';
             }
+
+            const offerId = geoStatus.offer_id || buildOffer().offer_id;
+            document.querySelectorAll('.ant-card-body').forEach(card => {
+                const partIdMatch = (card.textContent || '').match(/Part ID:\s*(\d+)/);
+                if (partIdMatch) {
+                    injectGeoControl(card, geoStatus, latestAgentGeoSource, offerId, partIdMatch[1]);
+                }
+            });
         }
     };
 
@@ -893,7 +996,7 @@
             if (!data || !data.offer_id || data.offer_id === "unknown") return;
             chrome.runtime.sendMessage({ action: "GET_AGENT_GEO", offerId: data.offer_id }, (response) => {
                 if (chrome.runtime.lastError || !response || !response.success) return;
-                BackendUI.showAgentGeo(response.data);
+                BackendUI.showAgentGeo(response.data, response.source);
             });
         } catch (e) { }
     }

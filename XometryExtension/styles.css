@@ -143,3 +143,31 @@
 .xom-grand-total-box.xom-minimized .xom-minimized-placeholder {
   display: block;
 }
+
+.xom-geo-row {
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.xom-geo-btn {
+  display: inline-flex;
+  align-items: center;
+  max-width: 260px;
+  padding: 3px 8px;
+  border: 1px solid #52c41a;
+  border-radius: 4px;
+  background: #f6ffed;
+  color: #237804;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.xom-geo-btn:hover {
+  background: #d9f7be;
+  color: #135200;
+}

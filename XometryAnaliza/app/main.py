@@ -1,9 +1,13 @@
 from typing import Any
+from pathlib import PureWindowsPath
+from urllib.parse import quote
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from .agents import process_jobs
+from .geo_files import read_remote_geo_file
 from .store import find_job_by_offer_id, list_jobs, read_events
 
 
@@ -54,3 +58,37 @@ def geo_status(offer_id: str) -> dict[str, Any]:
         "geo_items": sheet.get("geo_items") or [],
         "state": state,
     }
+
+
+@app.get("/api/agents/geo/{offer_id}/files/{item_index}")
+def geo_file(offer_id: str, item_index: int) -> Response:
+    state = find_job_by_offer_id(offer_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Offer not found in XometryAnaliza.")
+
+    sheet = state.get("sheet_metal_laser") or {}
+    geo_items = sheet.get("geo_items") or []
+    if item_index < 0 or item_index >= len(geo_items):
+        raise HTTPException(status_code=404, detail="GEO item not found.")
+
+    item = geo_items[item_index]
+    target_path = item.get("target_path")
+    if not target_path:
+        raise HTTPException(status_code=404, detail="GEO item has no target path.")
+
+    try:
+        content = read_remote_geo_file(str(target_path))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Remote GEO file was not found.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not read remote GEO file: {type(exc).__name__}: {exc}") from exc
+
+    filename = PureWindowsPath(str(target_path)).name or f"{offer_id}-{item_index}.geo"
+    return Response(
+        content,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "X-Geo-Path": str(target_path),
+        },
+    )

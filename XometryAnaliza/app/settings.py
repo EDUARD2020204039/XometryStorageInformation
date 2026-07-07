@@ -16,6 +16,11 @@ SHEET_AGENT_RETRY_SECONDS = int(os.getenv("SHEET_AGENT_RETRY_SECONDS", "3600"))
 XOMETRY_EMAIL = os.getenv("XOMETRY_EMAIL", "")
 XOMETRY_PASSWORD = os.getenv("XOMETRY_PASSWORD", "")
 
+GEO_SFTP_HOST = os.getenv("GEO_SFTP_HOST", "192.168.2.26")
+GEO_SFTP_PORT = int(os.getenv("GEO_SFTP_PORT", "22"))
+GEO_SFTP_USER = os.getenv("GEO_SFTP_USER", "Dorina")
+GEO_SFTP_KEY_PATH = os.getenv("GEO_SFTP_KEY_PATH", "/app/data/ssh/id_ed25519")
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("1", "true", "yes")
