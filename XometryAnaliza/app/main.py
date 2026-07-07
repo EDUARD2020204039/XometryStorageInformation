@@ -90,6 +90,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
     dimensions = preview_stats.get("dimensions") or "necunoscut"
     cut_count = preview_stats.get("cut_segments", 0)
     bend_count = preview_stats.get("bend_segments", 0)
+    hole_count = preview_stats.get("holes", 0)
     point_count = preview_stats.get("points", 0)
     xometry_button = (
         f'<a class="button secondary" href="{safe_xometry_url}" target="_blank" rel="noreferrer">Deschide oferta Xometry</a>'
@@ -207,6 +208,51 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
     .swatch.bend {{
       background: #f59e0b;
     }}
+    .swatch.hole {{
+      background: #93c5fd;
+    }}
+    .tool-row {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #d9e2ec;
+      background: #f8fafc;
+    }}
+    .metric-grid {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(88px, 1fr));
+      gap: 8px;
+      color: #475569;
+      font-size: 12px;
+    }}
+    .metric {{
+      border: 1px solid #d7dee8;
+      border-radius: 4px;
+      background: #ffffff;
+      padding: 5px 8px;
+    }}
+    .metric strong {{
+      display: block;
+      color: #0f172a;
+      font-size: 13px;
+    }}
+    .tool-buttons {{
+      display: flex;
+      gap: 6px;
+    }}
+    .icon-button {{
+      min-width: 32px;
+      height: 30px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: #ffffff;
+      color: #0f172a;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }}
     .cad-frame {{
       height: calc(100vh - 245px);
       min-height: 520px;
@@ -224,7 +270,13 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
       display: block;
       width: 100%;
       height: 100%;
-      background: radial-gradient(circle at 30% 20%, #15203a 0, #0b1120 42%, #070b14 100%);
+      cursor: grab;
+      background:
+        radial-gradient(circle at 25% 18%, rgba(59, 130, 246, 0.18) 0, rgba(12, 18, 34, 0) 35%),
+        linear-gradient(145deg, #101827 0%, #070b14 100%);
+    }}
+    .geo-svg:active {{
+      cursor: grabbing;
     }}
     .geo-grid {{
       stroke: rgba(148, 163, 184, 0.17);
@@ -234,26 +286,75 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
       stroke: rgba(148, 163, 184, 0.35);
       stroke-width: 0.45;
     }}
+    .geo-build-plate {{
+      fill: rgba(15, 23, 42, 0.18);
+      stroke: rgba(148, 163, 184, 0.22);
+      stroke-width: 0.5;
+      vector-effect: non-scaling-stroke;
+    }}
+    .geo-cut-shadow {{
+      fill: none;
+      stroke: rgba(2, 6, 23, 0.80);
+      stroke-width: 5.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }}
     .geo-cut {{
       fill: none;
-      stroke: #22d3ee;
+      stroke: #f8fafc;
+      stroke-width: 2.1;
       stroke-linecap: round;
       stroke-linejoin: round;
       vector-effect: non-scaling-stroke;
     }}
     .geo-arc {{
       fill: none;
-      stroke: #67e8f9;
+      stroke: #f8fafc;
+      stroke-width: 2.1;
       stroke-linecap: round;
       stroke-linejoin: round;
       vector-effect: non-scaling-stroke;
     }}
+    .geo-hole {{
+      fill: rgba(15, 23, 42, 0.68);
+      stroke: #93c5fd;
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }}
     .geo-bend {{
       fill: none;
-      stroke: #f59e0b;
+      stroke: #fbbf24;
+      stroke-width: 1.7;
       stroke-dasharray: 6 5;
       stroke-linecap: round;
       vector-effect: non-scaling-stroke;
+    }}
+    .geo-node {{
+      fill: #38bdf8;
+      stroke: #0f172a;
+      stroke-width: 0.8;
+      vector-effect: non-scaling-stroke;
+    }}
+    .geo-dim {{
+      stroke: #94a3b8;
+      stroke-width: 0.8;
+      vector-effect: non-scaling-stroke;
+    }}
+    .geo-dim-text {{
+      fill: #cbd5e1;
+      font-family: Arial, sans-serif;
+      font-size: 4px;
+      font-weight: 700;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }}
+    .geo-watermark {{
+      fill: rgba(226, 232, 240, 0.42);
+      font-family: Arial, sans-serif;
+      font-size: 5px;
+      font-weight: 700;
+      letter-spacing: 0;
     }}
     details {{
       margin-top: 14px;
@@ -296,8 +397,22 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
           <div class="viewer-meta">{html.escape(dimensions)} · {cut_count} contururi · {bend_count} indoituri · {point_count} puncte</div>
         </div>
         <div class="legend">
-          <span><i class="swatch cut"></i> Taiere</span>
+          <span><i class="swatch cut"></i> Contur</span>
+          <span><i class="swatch hole"></i> Gauri</span>
           <span><i class="swatch bend"></i> Indoire</span>
+        </div>
+      </div>
+      <div class="tool-row">
+        <div class="metric-grid">
+          <div class="metric"><strong>{html.escape(dimensions)}</strong>Dimensiuni</div>
+          <div class="metric"><strong>{cut_count}</strong>Contururi</div>
+          <div class="metric"><strong>{hole_count}</strong>Gauri</div>
+          <div class="metric"><strong>{bend_count}</strong>Indoituri</div>
+        </div>
+        <div class="tool-buttons">
+          <button class="icon-button" type="button" data-geo-zoom="in" title="Zoom in">+</button>
+          <button class="icon-button" type="button" data-geo-zoom="out" title="Zoom out">-</button>
+          <button class="icon-button" type="button" data-geo-zoom="fit" title="Fit">Fit</button>
         </div>
       </div>
       <div class="cad-frame">{safe_preview_svg}</div>
@@ -307,6 +422,66 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
       <pre>{safe_content}</pre>
     </details>
   </main>
+  <script>
+    (() => {{
+      const svg = document.getElementById('geo-render');
+      if (!svg) return;
+      const original = (svg.dataset.viewbox || svg.getAttribute('viewBox')).split(/\\s+/).map(Number);
+      let box = [...original];
+      let dragging = false;
+      let start = null;
+      const setBox = () => svg.setAttribute('viewBox', box.map(v => Number(v.toFixed(3))).join(' '));
+      const zoomAt = (factor, cx = box[0] + box[2] / 2, cy = box[1] + box[3] / 2) => {{
+        const nextW = box[2] * factor;
+        const nextH = box[3] * factor;
+        box[0] = cx - (cx - box[0]) * factor;
+        box[1] = cy - (cy - box[1]) * factor;
+        box[2] = nextW;
+        box[3] = nextH;
+        setBox();
+      }};
+      const svgPoint = event => {{
+        const pt = svg.createSVGPoint();
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+        return pt.matrixTransform(svg.getScreenCTM().inverse());
+      }};
+      svg.addEventListener('wheel', event => {{
+        event.preventDefault();
+        const pt = svgPoint(event);
+        zoomAt(event.deltaY < 0 ? 0.86 : 1.16, pt.x, pt.y);
+      }}, {{ passive: false }});
+      svg.addEventListener('pointerdown', event => {{
+        dragging = true;
+        start = {{ clientX: event.clientX, clientY: event.clientY, box: [...box] }};
+        svg.setPointerCapture(event.pointerId);
+      }});
+      svg.addEventListener('pointermove', event => {{
+        if (!dragging || !start) return;
+        const scaleX = box[2] / Math.max(svg.clientWidth, 1);
+        const scaleY = box[3] / Math.max(svg.clientHeight, 1);
+        box[0] = start.box[0] - (event.clientX - start.clientX) * scaleX;
+        box[1] = start.box[1] - (event.clientY - start.clientY) * scaleY;
+        setBox();
+      }});
+      svg.addEventListener('pointerup', event => {{
+        dragging = false;
+        start = null;
+        try {{ svg.releasePointerCapture(event.pointerId); }} catch (_) {{}}
+      }});
+      document.querySelectorAll('[data-geo-zoom]').forEach(button => {{
+        button.addEventListener('click', () => {{
+          const mode = button.dataset.geoZoom;
+          if (mode === 'fit') {{
+            box = [...original];
+            setBox();
+          }} else {{
+            zoomAt(mode === 'in' ? 0.82 : 1.22);
+          }}
+        }});
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
     )
@@ -363,6 +538,7 @@ def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
     lines = [line.strip() for line in text.splitlines()]
     points: dict[int, tuple[float, float]] = {}
     cut_segments: list[tuple[str, tuple[int, ...]]] = []
+    cut_circles: list[tuple[int, float]] = []
     bend_segments: list[tuple[str, tuple[int, ...]]] = []
     block = ""
 
@@ -377,7 +553,7 @@ def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
                 points[point_ids[0]] = coords
             continue
 
-        if line not in {"LIN", "ARC"} or index + 2 >= len(lines):
+        if line not in {"LIN", "ARC", "CIR"} or index + 2 >= len(lines):
             continue
 
         refs = tuple(_ints_from_line(lines[index + 2]))
@@ -387,16 +563,26 @@ def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
                 target.append(("line", refs[:2]))
         elif line == "ARC" and len(refs) >= 3 and block == "#~331":
             cut_segments.append(("arc", refs[:3]))
+        elif line == "CIR" and refs and index + 3 < len(lines) and block == "#~331":
+            try:
+                radius = float(lines[index + 3].split()[0])
+            except (ValueError, IndexError):
+                radius = 0.0
+            if radius > 0:
+                cut_circles.append((refs[0], radius))
 
     used_ids = set()
     for _, refs in [*cut_segments, *bend_segments]:
         used_ids.update(refs)
+    for center_id, _ in cut_circles:
+        used_ids.add(center_id)
     used_points = [points[point_id] for point_id in used_ids if point_id in points]
 
     stats: dict[str, Any] = {
         "points": len(points),
         "cut_segments": len(cut_segments),
         "bend_segments": len(bend_segments),
+        "holes": len(cut_circles),
         "dimensions": "necunoscut",
     }
 
@@ -409,7 +595,7 @@ def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
     max_y = max(point[1] for point in used_points)
     width = max(max_x - min_x, 1.0)
     height = max(max_y - min_y, 1.0)
-    pad = max(max(width, height) * 0.06, 8.0)
+    pad = max(max(width, height) * 0.10, 18.0)
     view_w = width + pad * 2
     view_h = height + pad * 2
     stats["dimensions"] = f"{width:.1f} x {height:.1f} mm"
@@ -445,13 +631,31 @@ def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
         grid.append(f'<line class="{cls}" x1="0" y1="{fmt(y)}" x2="{fmt(view_w)}" y2="{fmt(y)}" />')
         gy += grid_step
 
+    left = pad
+    right = pad + width
+    top = pad
+    bottom = pad + height
+    dim_y = bottom + pad * 0.45
+    dim_x = left - pad * 0.45
+    dim_arrow = (
+        '<defs>'
+        '<marker id="geo-arrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">'
+        '<path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8" />'
+        '</marker>'
+        '</defs>'
+    )
+
     cut_svg = []
+    cut_shadow_svg = []
     for kind, refs in cut_segments:
         if kind == "line":
             a = point(refs[0])
             b = point(refs[1])
             if not a or not b:
                 continue
+            cut_shadow_svg.append(
+                f'<line class="geo-cut-shadow" x1="{fmt(a[0])}" y1="{fmt(a[1])}" x2="{fmt(b[0])}" y2="{fmt(b[1])}" />'
+            )
             cut_svg.append(
                 f'<line class="geo-cut" x1="{fmt(a[0])}" y1="{fmt(a[1])}" x2="{fmt(b[0])}" y2="{fmt(b[1])}" />'
             )
@@ -461,9 +665,27 @@ def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
             c = point(refs[2])
             if not a or not b or not c:
                 continue
+            cut_shadow_svg.append(
+                f'<path class="geo-cut-shadow" d="M {fmt(a[0])} {fmt(a[1])} Q {fmt(b[0])} {fmt(b[1])} {fmt(c[0])} {fmt(c[1])}" />'
+            )
             cut_svg.append(
                 f'<path class="geo-arc" d="M {fmt(a[0])} {fmt(a[1])} Q {fmt(b[0])} {fmt(b[1])} {fmt(c[0])} {fmt(c[1])}" />'
             )
+
+    hole_svg = []
+    node_svg = []
+    for center_id, radius in cut_circles:
+        center = point(center_id)
+        if not center:
+            continue
+        hole_svg.append(
+            f'<circle class="geo-hole" cx="{fmt(center[0])}" cy="{fmt(center[1])}" r="{fmt(radius)}" />'
+        )
+
+    for point_id in sorted(used_ids):
+        rendered = point(point_id)
+        if rendered:
+            node_svg.append(f'<circle class="geo-node" cx="{fmt(rendered[0])}" cy="{fmt(rendered[1])}" r="0.9" />')
 
     bend_svg = []
     for _, refs in bend_segments:
@@ -475,11 +697,34 @@ def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
             f'<line class="geo-bend" x1="{fmt(a[0])}" y1="{fmt(a[1])}" x2="{fmt(b[0])}" y2="{fmt(b[1])}" />'
         )
 
+    dimensions_svg = (
+        f'<g>'
+        f'<line class="geo-dim" x1="{fmt(left)}" y1="{fmt(dim_y)}" x2="{fmt(right)}" y2="{fmt(dim_y)}" '
+        f'marker-start="url(#geo-arrow)" marker-end="url(#geo-arrow)" />'
+        f'<line class="geo-dim" x1="{fmt(left)}" y1="{fmt(bottom)}" x2="{fmt(left)}" y2="{fmt(dim_y)}" />'
+        f'<line class="geo-dim" x1="{fmt(right)}" y1="{fmt(bottom)}" x2="{fmt(right)}" y2="{fmt(dim_y)}" />'
+        f'<text class="geo-dim-text" x="{fmt((left + right) / 2)}" y="{fmt(dim_y + pad * 0.22)}">{width:.1f} mm</text>'
+        f'<line class="geo-dim" x1="{fmt(dim_x)}" y1="{fmt(top)}" x2="{fmt(dim_x)}" y2="{fmt(bottom)}" '
+        f'marker-start="url(#geo-arrow)" marker-end="url(#geo-arrow)" />'
+        f'<line class="geo-dim" x1="{fmt(dim_x)}" y1="{fmt(top)}" x2="{fmt(left)}" y2="{fmt(top)}" />'
+        f'<line class="geo-dim" x1="{fmt(dim_x)}" y1="{fmt(bottom)}" x2="{fmt(left)}" y2="{fmt(bottom)}" />'
+        f'<text class="geo-dim-text" transform="translate({fmt(dim_x - pad * 0.24)} {fmt((top + bottom) / 2)}) rotate(-90)">{height:.1f} mm</text>'
+        f'</g>'
+    )
+
     return (
-        f'<svg class="geo-svg" viewBox="0 0 {fmt(view_w)} {fmt(view_h)}" role="img" aria-label="GEO preview">'
+        f'<svg id="geo-render" class="geo-svg" viewBox="0 0 {fmt(view_w)} {fmt(view_h)}" '
+        f'data-viewbox="0 0 {fmt(view_w)} {fmt(view_h)}" role="img" aria-label="GEO preview">'
+        f'{dim_arrow}'
         f'<g>{"".join(grid)}</g>'
+        f'<rect class="geo-build-plate" x="{fmt(left)}" y="{fmt(top)}" width="{fmt(width)}" height="{fmt(height)}" rx="1.5" />'
+        f'{dimensions_svg}'
+        f'<text class="geo-watermark" x="{fmt(left)}" y="{fmt(top - pad * 0.35)}">BUILD123 STYLE RENDER</text>'
+        f'<g transform="translate(1.4 1.6)">{"".join(cut_shadow_svg)}</g>'
         f'<g>{"".join(cut_svg)}</g>'
+        f'<g>{"".join(hole_svg)}</g>'
         f'<g>{"".join(bend_svg)}</g>'
+        f'<g>{"".join(node_svg)}</g>'
         "</svg>",
         stats,
     )
