@@ -11,7 +11,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.53 Loaded (content_v20.js)");
+    log("Extension v2.54 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -38,6 +38,16 @@
         };
     }
 
+    function extractPartId(text) {
+        const match = String(text || '').match(/Part ID:\s*([A-Z]{1,4}-[A-Z]{1,4}\d+|\d+)/i);
+        return match ? match[1].trim().toUpperCase() : null;
+    }
+
+    function partIdNumber(partId) {
+        const match = String(partId || '').match(/(\d+)/);
+        return match ? match[1] : '';
+    }
+
     async function scanForCards() {
         if (!document.getElementById('xom-grand-total-box')) {
             const box = document.createElement('div');
@@ -47,7 +57,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.53</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.54</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -127,8 +137,7 @@
         const text = card.textContent;
         if (!text.includes("Part ID:")) return;
 
-        const partIdMatch = text.match(/Part ID:\s*(\d+)/);
-        const partId = partIdMatch ? partIdMatch[1] : "unknown";
+        const partId = extractPartId(text) || "unknown";
 
         // Prevent re-processing the same part (fixes Overwriting Manual Thickness changes)
         if (card.dataset.xomProcessed === partId) return;
@@ -566,6 +575,7 @@
         const text = card.innerText || '';
         const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
         const partIdIndex = lines.findIndex(line => line.includes('Part ID:'));
+        if (partIdIndex >= 0 && lines[partIdIndex + 1]) return lines[partIdIndex + 1];
         if (partIdIndex > 0) return lines[partIdIndex - 1];
         const strong = card.querySelector('strong, b, .ant-typography-strong');
         return strong ? strong.innerText.trim() : '';
@@ -578,7 +588,17 @@
 
         if (!indexed.length) return null;
 
-        const tokens = [partId, `part${partId}`, `part-${partId}`, `part_${partId}`]
+        const numericPartId = partIdNumber(partId);
+        const tokens = [
+            partId,
+            numericPartId,
+            `part${partId}`,
+            `part-${partId}`,
+            `part_${partId}`,
+            numericPartId ? `part${numericPartId}` : '',
+            numericPartId ? `part-${numericPartId}` : '',
+            numericPartId ? `part_${numericPartId}` : ''
+        ]
             .filter(Boolean)
             .map(token => String(token).toLowerCase());
         const byPartId = indexed.find(entry => {
@@ -934,7 +954,7 @@
             const items = geoStatus.geo_items || [];
             const first = items.find(item => item.target_path) || items[0];
             if (geoStatus.ok && first && first.target_path) {
-                badge.textContent = `.geo: ${first.target_path}`;
+                badge.textContent = 'GEO gata';
                 badge.title = JSON.stringify(items, null, 2);
                 badge.style.backgroundColor = '#f6ffed';
                 badge.style.color = '#237804';
@@ -955,9 +975,9 @@
 
             const offerId = geoStatus.offer_id || buildOffer().offer_id;
             document.querySelectorAll('.ant-card-body').forEach(card => {
-                const partIdMatch = (card.textContent || '').match(/Part ID:\s*(\d+)/);
-                if (partIdMatch) {
-                    injectGeoControl(card, geoStatus, latestAgentGeoSource, offerId, partIdMatch[1]);
+                const partId = extractPartId(card.textContent || '');
+                if (partId) {
+                    injectGeoControl(card, geoStatus, latestAgentGeoSource, offerId, partId);
                 }
             });
         }
@@ -1045,7 +1065,7 @@
     function parsePartCard(card) {
         try {
             const text = card.innerText;
-            const partId = text.match(/Part ID:\s*(\d+)/)?.[1];
+            const partId = extractPartId(text);
             if (!partId) return null;
 
             // Image
@@ -1262,7 +1282,7 @@
         });
 
         const h3 = document.createElement('h3');
-        h3.innerText = 'Extensions Updated! (v2.51)';
+        h3.innerText = 'Extensions Updated! (v2.54)';
         Object.assign(h3.style, { margin: '0 0 10px 0', color: '#1890ff' });
 
         const ul = document.createElement('ul');
