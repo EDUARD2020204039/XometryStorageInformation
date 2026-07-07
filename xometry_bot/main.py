@@ -72,7 +72,7 @@ def run_iteration():
         return [
             (index, item)
             for index, item in enumerate(geo_status.get("geo_items") or [])
-            if (item.get("target_path") or item.get("targetPath")) and item.get("geo_exists") is not False
+            if (item.get("target_path") or item.get("targetPath")) and item.get("geo_exists") is True
         ]
 
     def _geo_view_url(offer_id, item_index):
