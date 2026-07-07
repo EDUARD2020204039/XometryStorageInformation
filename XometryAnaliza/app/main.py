@@ -1,4 +1,5 @@
 import html
+import re
 from typing import Any
 from pathlib import PureWindowsPath
 from urllib.parse import quote
@@ -79,11 +80,17 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
     job = state.get("job") or {}
     xometry_url = str(job.get("link") or job.get("url") or "")
     download_url = f"/api/agents/geo/{quote(offer_id, safe='')}/files/{item_index}"
-    text = content.decode("utf-8", errors="replace")
+    text = _decode_geo_text(content)
+    preview_svg, preview_stats = _geo_preview_svg(text)
     safe_title = html.escape(filename)
     safe_path = html.escape(str(target_path))
     safe_content = html.escape(text)
+    safe_preview_svg = preview_svg
     safe_xometry_url = html.escape(xometry_url, quote=True)
+    dimensions = preview_stats.get("dimensions") or "necunoscut"
+    cut_count = preview_stats.get("cut_segments", 0)
+    bend_count = preview_stats.get("bend_segments", 0)
+    point_count = preview_stats.get("points", 0)
     xometry_button = (
         f'<a class="button secondary" href="{safe_xometry_url}" target="_blank" rel="noreferrer">Deschide oferta Xometry</a>'
         if xometry_url
@@ -100,7 +107,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
   <style>
     body {{
       margin: 0;
-      background: #f4f6f8;
+      background: #eef2f5;
       color: #111827;
       font-family: Arial, sans-serif;
     }}
@@ -149,8 +156,116 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
     main {{
       padding: 18px 22px;
     }}
+    .viewer {{
+      border: 1px solid #cfd8e3;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #ffffff;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }}
+    .viewer-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid #d9e2ec;
+      background: #f8fafc;
+    }}
+    .viewer-title {{
+      font-size: 15px;
+      font-weight: 700;
+    }}
+    .viewer-meta {{
+      margin-top: 4px;
+      color: #52606d;
+      font-size: 12px;
+    }}
+    .legend {{
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      color: #52606d;
+      font-size: 12px;
+    }}
+    .legend span {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }}
+    .swatch {{
+      width: 18px;
+      height: 3px;
+      border-radius: 999px;
+      display: inline-block;
+    }}
+    .swatch.cut {{
+      background: #22d3ee;
+    }}
+    .swatch.bend {{
+      background: #f59e0b;
+    }}
+    .cad-frame {{
+      height: calc(100vh - 245px);
+      min-height: 520px;
+      background: #0b1120;
+    }}
+    .cad-empty {{
+      display: flex;
+      height: 100%;
+      align-items: center;
+      justify-content: center;
+      color: #dbeafe;
+      font-size: 15px;
+    }}
+    .geo-svg {{
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 30% 20%, #15203a 0, #0b1120 42%, #070b14 100%);
+    }}
+    .geo-grid {{
+      stroke: rgba(148, 163, 184, 0.17);
+      stroke-width: 0.25;
+    }}
+    .geo-axis {{
+      stroke: rgba(148, 163, 184, 0.35);
+      stroke-width: 0.45;
+    }}
+    .geo-cut {{
+      fill: none;
+      stroke: #22d3ee;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }}
+    .geo-arc {{
+      fill: none;
+      stroke: #67e8f9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }}
+    .geo-bend {{
+      fill: none;
+      stroke: #f59e0b;
+      stroke-dasharray: 6 5;
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }}
+    details {{
+      margin-top: 14px;
+    }}
+    summary {{
+      cursor: pointer;
+      color: #334155;
+      font-weight: 700;
+      font-size: 13px;
+    }}
     pre {{
-      margin: 0;
+      margin: 12px 0 0;
       padding: 16px;
       border: 1px solid #d9e2ec;
       border-radius: 6px;
@@ -174,7 +289,23 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
     </div>
   </header>
   <main>
-    <pre>{safe_content}</pre>
+    <section class="viewer">
+      <div class="viewer-head">
+        <div>
+          <div class="viewer-title">Preview desfasurata GEO</div>
+          <div class="viewer-meta">{html.escape(dimensions)} · {cut_count} contururi · {bend_count} indoituri · {point_count} puncte</div>
+        </div>
+        <div class="legend">
+          <span><i class="swatch cut"></i> Taiere</span>
+          <span><i class="swatch bend"></i> Indoire</span>
+        </div>
+      </div>
+      <div class="cad-frame">{safe_preview_svg}</div>
+    </section>
+    <details>
+      <summary>Arata continut raw .geo</summary>
+      <pre>{safe_content}</pre>
+    </details>
   </main>
 </body>
 </html>"""
@@ -205,3 +336,160 @@ def _read_geo_file(offer_id: str, item_index: int) -> tuple[dict[str, Any], str,
 
     filename = PureWindowsPath(str(target_path)).name or f"{offer_id}-{item_index}.geo"
     return state, str(target_path), content, filename
+
+
+def _decode_geo_text(content: bytes) -> str:
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
+        return content.decode("cp1252", errors="replace")
+
+
+def _ints_from_line(value: str) -> list[int]:
+    return [int(match) for match in re.findall(r"-?\d+", value)]
+
+
+def _point_from_line(value: str) -> tuple[float, float] | None:
+    parts = value.split()
+    if len(parts) < 2:
+        return None
+    try:
+        return float(parts[0]), float(parts[1])
+    except ValueError:
+        return None
+
+
+def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
+    lines = [line.strip() for line in text.splitlines()]
+    points: dict[int, tuple[float, float]] = {}
+    cut_segments: list[tuple[str, tuple[int, ...]]] = []
+    bend_segments: list[tuple[str, tuple[int, ...]]] = []
+    block = ""
+
+    for index, line in enumerate(lines):
+        if line.startswith("#~"):
+            block = line
+
+        if line == "P" and index + 2 < len(lines):
+            point_ids = _ints_from_line(lines[index + 1])
+            coords = _point_from_line(lines[index + 2])
+            if len(point_ids) == 1 and coords:
+                points[point_ids[0]] = coords
+            continue
+
+        if line not in {"LIN", "ARC"} or index + 2 >= len(lines):
+            continue
+
+        refs = tuple(_ints_from_line(lines[index + 2]))
+        if line == "LIN" and len(refs) >= 2:
+            target = bend_segments if block == "#~371" else cut_segments if block == "#~331" else None
+            if target is not None:
+                target.append(("line", refs[:2]))
+        elif line == "ARC" and len(refs) >= 3 and block == "#~331":
+            cut_segments.append(("arc", refs[:3]))
+
+    used_ids = set()
+    for _, refs in [*cut_segments, *bend_segments]:
+        used_ids.update(refs)
+    used_points = [points[point_id] for point_id in used_ids if point_id in points]
+
+    stats: dict[str, Any] = {
+        "points": len(points),
+        "cut_segments": len(cut_segments),
+        "bend_segments": len(bend_segments),
+        "dimensions": "necunoscut",
+    }
+
+    if not used_points:
+        return '<div class="cad-empty">Nu am putut reconstrui geometria din acest fisier GEO.</div>', stats
+
+    min_x = min(point[0] for point in used_points)
+    max_x = max(point[0] for point in used_points)
+    min_y = min(point[1] for point in used_points)
+    max_y = max(point[1] for point in used_points)
+    width = max(max_x - min_x, 1.0)
+    height = max(max_y - min_y, 1.0)
+    pad = max(max(width, height) * 0.06, 8.0)
+    view_w = width + pad * 2
+    view_h = height + pad * 2
+    stats["dimensions"] = f"{width:.1f} x {height:.1f} mm"
+
+    def point(point_id: int) -> tuple[float, float] | None:
+        raw = points.get(point_id)
+        if raw is None:
+            return None
+        x, y = raw
+        return x - min_x + pad, max_y - y + pad
+
+    def fmt(value: float) -> str:
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+
+    grid = []
+    grid_step = _nice_grid_step(max(width, height))
+    grid_start_x = int(min_x // grid_step) * grid_step
+    grid_end_x = int(max_x // grid_step + 2) * grid_step
+    grid_start_y = int(min_y // grid_step) * grid_step
+    grid_end_y = int(max_y // grid_step + 2) * grid_step
+
+    gx = grid_start_x
+    while gx <= grid_end_x:
+        x = gx - min_x + pad
+        cls = "geo-axis" if abs(gx) < 0.0001 else "geo-grid"
+        grid.append(f'<line class="{cls}" x1="{fmt(x)}" y1="0" x2="{fmt(x)}" y2="{fmt(view_h)}" />')
+        gx += grid_step
+
+    gy = grid_start_y
+    while gy <= grid_end_y:
+        y = max_y - gy + pad
+        cls = "geo-axis" if abs(gy) < 0.0001 else "geo-grid"
+        grid.append(f'<line class="{cls}" x1="0" y1="{fmt(y)}" x2="{fmt(view_w)}" y2="{fmt(y)}" />')
+        gy += grid_step
+
+    cut_svg = []
+    for kind, refs in cut_segments:
+        if kind == "line":
+            a = point(refs[0])
+            b = point(refs[1])
+            if not a or not b:
+                continue
+            cut_svg.append(
+                f'<line class="geo-cut" x1="{fmt(a[0])}" y1="{fmt(a[1])}" x2="{fmt(b[0])}" y2="{fmt(b[1])}" />'
+            )
+        elif kind == "arc":
+            a = point(refs[0])
+            b = point(refs[1])
+            c = point(refs[2])
+            if not a or not b or not c:
+                continue
+            cut_svg.append(
+                f'<path class="geo-arc" d="M {fmt(a[0])} {fmt(a[1])} Q {fmt(b[0])} {fmt(b[1])} {fmt(c[0])} {fmt(c[1])}" />'
+            )
+
+    bend_svg = []
+    for _, refs in bend_segments:
+        a = point(refs[0])
+        b = point(refs[1])
+        if not a or not b:
+            continue
+        bend_svg.append(
+            f'<line class="geo-bend" x1="{fmt(a[0])}" y1="{fmt(a[1])}" x2="{fmt(b[0])}" y2="{fmt(b[1])}" />'
+        )
+
+    return (
+        f'<svg class="geo-svg" viewBox="0 0 {fmt(view_w)} {fmt(view_h)}" role="img" aria-label="GEO preview">'
+        f'<g>{"".join(grid)}</g>'
+        f'<g>{"".join(cut_svg)}</g>'
+        f'<g>{"".join(bend_svg)}</g>'
+        "</svg>",
+        stats,
+    )
+
+
+def _nice_grid_step(span: float) -> float:
+    if span <= 50:
+        return 5.0
+    if span <= 150:
+        return 10.0
+    if span <= 500:
+        return 25.0
+    return 50.0
