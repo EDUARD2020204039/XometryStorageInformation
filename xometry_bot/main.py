@@ -75,10 +75,10 @@ def run_iteration():
             if (item.get("target_path") or item.get("targetPath")) and item.get("geo_exists") is not False
         ]
 
-    def _geo_download_url(offer_id, item_index):
+    def _geo_view_url(offer_id, item_index):
         return (
             f"{config.AGENT_PUBLIC_URL.rstrip('/')}/api/agents/geo/"
-            f"{quote(str(offer_id))}/files/{item_index}"
+            f"{quote(str(offer_id))}/files/{item_index}/view"
         )
 
     def _fetch_geo_status(job):
@@ -111,11 +111,9 @@ def run_iteration():
         geo_ready_items = _geo_items(geo_status)
         if geo_ready_items and offer_id:
             first_index, first_item = geo_ready_items[0]
-            target = first_item.get("target_path") or first_item.get("targetPath") or ""
-            file_name = target.replace("\\", "/").split("/")[-1] or ".geo"
-            geo_url = _geo_download_url(offer_id, first_index)
-            geo_line = f'GEO: <a href="{escape_html(geo_url)}">✅ există {escape_html(file_name)}</a>\n'
-            geo_state_key = "geo:" + "|".join(
+            geo_url = _geo_view_url(offer_id, first_index)
+            geo_line = f'Geo: <a href="{escape_html(geo_url)}">exista</a>\n'
+            geo_state_key = "geo_text_link_v2:" + "|".join(
                 str(item.get("target_path") or item.get("targetPath") or "")
                 for _, item in geo_ready_items
             )
@@ -126,15 +124,7 @@ def run_iteration():
             geo_line = "GEO: RFQ fără fișiere pentru desfașurată automată\n"
             geo_state_key = "geo:skipped_rfq"
 
-        buttons = []
-        if geo_url:
-            buttons.append({"text": "📐 GEO .geo", "url": geo_url})
-        if link:
-            buttons.append({"text": "🔗 Xometry", "url": link})
-
         keyboard = []
-        if buttons:
-            keyboard.append(buttons)
         if offer_id:
             keyboard.append([{"text": "❌ Decline", "callback_data": f"decline:{offer_id}"}])
         reply_markup = {"inline_keyboard": keyboard} if keyboard else None
