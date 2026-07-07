@@ -91,6 +91,20 @@ def run_iteration():
             return None
         return data
 
+    def _requires_geo_before_notify(job):
+        haystack = f"{job.get('material', '')} {job.get('process', '')}".lower()
+        geo_keywords = (
+            "sheet",
+            "metal sheet",
+            "sheet metal",
+            "tabla",
+            "tablă",
+            "laser",
+            "laser cutting",
+            "bending",
+        )
+        return any(keyword in haystack for keyword in geo_keywords)
+
     def _interesting_message(job, geo_status=None):
         jid = job["id"]
         link = job.get("link", "")
@@ -117,9 +131,6 @@ def run_iteration():
                 str(item.get("target_path") or item.get("targetPath") or "")
                 for _, item in geo_ready_items
             )
-        elif geo_status and geo_status.get("status") in {"running", "geo_requested"}:
-            geo_line = "GEO: se generează\n"
-            geo_state_key = f"geo:{geo_status.get('status')}"
         elif geo_status and geo_status.get("status") == "skipped_rfq":
             geo_line = "GEO: RFQ fără fișiere pentru desfașurată automată\n"
             geo_state_key = "geo:skipped_rfq"
@@ -278,6 +289,10 @@ def run_iteration():
                     geo_status = _fetch_geo_status(job)
                     msg, reply_markup, geo_state_key, geo_ready = _interesting_message(job, geo_status)
                     logger.info(f"Checking/Sending notification for {job['id']}")
+                    if _requires_geo_before_notify(job) and not geo_ready:
+                        status = (geo_status or {}).get("status") or "not_ready"
+                        logger.info(f"Waiting for GEO before Telegram notification for {job['id']} ({status}).")
+                        continue
                     if notifier.is_already_notified(job["id"]):
                         if geo_ready:
                             notifier.edit_telegram_if_changed(
