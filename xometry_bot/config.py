@@ -47,6 +47,7 @@ BACKEND_MAX_OFFERS_PER_RUN = int(os.getenv("BACKEND_MAX_OFFERS_PER_RUN", "10"))
 
 # XometryAnaliza agent service
 AGENT_URL = os.getenv("AGENT_URL", "http://xometryanaliza:4468")
+AGENT_PUBLIC_URL = os.getenv("AGENT_PUBLIC_URL", "http://86.123.232.23:4468")
 AGENT_TIMEOUT = int(os.getenv("AGENT_TIMEOUT", "10"))
 
 # Orders deep sync

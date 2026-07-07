@@ -21,7 +21,7 @@ services:
       TELEGRAM_ENABLED: "true"
       TELEGRAM_SHEET_START_LOGS: "false"
       TELEGRAM_SHEET_FAILURE_LOGS: "false"
-      TELEGRAM_GEO_LOGS: "true"
+      TELEGRAM_GEO_LOGS: "false"
     ports:
       - "4468:4468"
     volumes:
@@ -54,6 +54,7 @@ services:
       BOT_ENTRYPOINT: main.py
       BACKEND_URL: "http://xometry-app:10000"
       AGENT_URL: "http://xometryanaliza:4468"
+      AGENT_PUBLIC_URL: "http://86.123.232.23:4468"
       AGENT_TIMEOUT: "10"
     env_file:
       - xometry_bot/.env
@@ -73,6 +74,7 @@ services:
       BOT_ENTRYPOINT: bot_app.py
       BACKEND_URL: "http://xometry-app:10000"
       AGENT_URL: "http://xometryanaliza:4468"
+      AGENT_PUBLIC_URL: "http://86.123.232.23:4468"
       AGENT_TIMEOUT: "10"
     env_file:
       - xometry_bot/.env

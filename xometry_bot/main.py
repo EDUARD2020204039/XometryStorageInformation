@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import os
+from urllib.parse import quote
 from playwright.sync_api import sync_playwright
 import config
 import auth
@@ -64,6 +65,90 @@ def run_iteration():
     """
     def escape_html(text):
         return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _geo_items(geo_status):
+        if not geo_status:
+            return []
+        return [
+            (index, item)
+            for index, item in enumerate(geo_status.get("geo_items") or [])
+            if (item.get("target_path") or item.get("targetPath")) and item.get("geo_exists") is not False
+        ]
+
+    def _geo_download_url(offer_id, item_index):
+        return (
+            f"{config.AGENT_PUBLIC_URL.rstrip('/')}/api/agents/geo/"
+            f"{quote(str(offer_id))}/files/{item_index}"
+        )
+
+    def _fetch_geo_status(job):
+        offer_id = job.get("offer_id")
+        if not offer_id:
+            return None
+        ok, err, data = agent_client.fetch_geo_status(offer_id)
+        if not ok:
+            logger.debug(f"GEO status unavailable for {job.get('id')}: {err}")
+            return None
+        return data
+
+    def _interesting_message(job, geo_status=None):
+        jid = job["id"]
+        link = job.get("link", "")
+        offer_id = job.get("offer_id")
+        jid_safe = escape_html(jid)
+        link_safe = escape_html(link)
+        id_str = f'<a href="{link_safe}">{jid_safe}</a>' if link else f"<code>{jid_safe}</code>"
+
+        type_label = "🔥 Urgent" if job["type"] == "Urgent" else job["type"]
+        type_label_safe = escape_html(type_label)
+        material_safe = escape_html(job["material"])
+        process_safe = escape_html(job["process"])
+        price_safe = escape_html(job["price"])
+
+        geo_line = ""
+        geo_url = None
+        geo_state_key = "geo:none"
+        geo_ready_items = _geo_items(geo_status)
+        if geo_ready_items and offer_id:
+            first_index, first_item = geo_ready_items[0]
+            target = first_item.get("target_path") or first_item.get("targetPath") or ""
+            file_name = target.replace("\\", "/").split("/")[-1] or ".geo"
+            geo_url = _geo_download_url(offer_id, first_index)
+            geo_line = f'GEO: <a href="{escape_html(geo_url)}">✅ există {escape_html(file_name)}</a>\n'
+            geo_state_key = "geo:" + "|".join(
+                str(item.get("target_path") or item.get("targetPath") or "")
+                for _, item in geo_ready_items
+            )
+        elif geo_status and geo_status.get("status") in {"running", "geo_requested"}:
+            geo_line = "GEO: se generează\n"
+            geo_state_key = f"geo:{geo_status.get('status')}"
+        elif geo_status and geo_status.get("status") == "skipped_rfq":
+            geo_line = "GEO: RFQ fără fișiere pentru desfașurată automată\n"
+            geo_state_key = "geo:skipped_rfq"
+
+        buttons = []
+        if geo_url:
+            buttons.append({"text": "📐 GEO .geo", "url": geo_url})
+        if link:
+            buttons.append({"text": "🔗 Xometry", "url": link})
+
+        keyboard = []
+        if buttons:
+            keyboard.append(buttons)
+        if offer_id:
+            keyboard.append([{"text": "❌ Decline", "callback_data": f"decline:{offer_id}"}])
+        reply_markup = {"inline_keyboard": keyboard} if keyboard else None
+
+        msg = (
+            f"🚀 <b>INTERESTING JOB FOUND</b> 🚀\n"
+            f"ID: {id_str}\n"
+            f"Type: {type_label_safe}\n"
+            f"Material: {material_safe}\n"
+            f"Price: €{price_safe}\n"
+            f"Process: {process_safe}\n"
+            f"{geo_line}"
+        )
+        return msg, reply_markup, geo_state_key, bool(geo_ready_items)
 
     def _orders_sync_state_path():
         return os.path.join("data", "orders_last_sync.txt")
@@ -200,6 +285,25 @@ def run_iteration():
             for job in jobs:
                 if filter.is_interesting(job):
                     interesting_count += 1
+                    geo_status = _fetch_geo_status(job)
+                    msg, reply_markup, geo_state_key, geo_ready = _interesting_message(job, geo_status)
+                    logger.info(f"Checking/Sending notification for {job['id']}")
+                    if notifier.is_already_notified(job["id"]):
+                        if geo_ready:
+                            notifier.edit_telegram_if_changed(
+                                job["id"],
+                                msg,
+                                reply_markup=reply_markup,
+                                state_key=geo_state_key,
+                            )
+                    else:
+                        notifier.send_telegram(
+                            msg,
+                            job_id=job["id"],
+                            reply_markup=reply_markup,
+                            state_key=geo_state_key,
+                        )
+                    continue
                     jid = job['id']
                     link = job.get('link', '')
                     
