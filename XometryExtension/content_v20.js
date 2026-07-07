@@ -4,6 +4,8 @@
 (function () {
     let latestAgentGeoStatus = null;
     let latestAgentGeoSource = null;
+    let latestAgentGeoToastKey = null;
+    let latestAgentGeoToastTimer = null;
 
     function log(msg) {
         // Log to browser console so user can see it
@@ -11,7 +13,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.57 Loaded (content_v20.js)");
+    log("Extension v2.58 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -57,7 +59,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.57</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.58</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -995,52 +997,71 @@
             latestAgentGeoStatus = geoStatus;
             latestAgentGeoSource = agentSource || latestAgentGeoSource;
 
-            let badge = document.getElementById('xom-agent-geo');
-            if (!badge) {
-                badge = document.createElement('span');
-                badge.id = 'xom-agent-geo';
-                Object.assign(badge.style, {
-                    padding: '10px 12px',
-                    borderRadius: '4px',
-                    fontSize: '13px',
-                    fontWeight: 'bold',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.12)'
-                });
-                container.appendChild(badge);
-            }
-
             const items = geoStatus.geo_items || [];
             const readyItems = readyGeoEntries(items).map(entry => entry.item);
             const failedItems = items.filter(item => item.geo_exists === false);
             const first = readyItems[0];
-            if (geoStatus.ok && first) {
-                badge.textContent = readyItems.length === 1 ? 'GEO gata' : `GEO gata: ${readyItems.length}`;
-                badge.title = JSON.stringify(readyItems, null, 2);
-                badge.style.backgroundColor = '#f6ffed';
-                badge.style.color = '#237804';
-                badge.style.border = '1px solid #b7eb8f';
-            } else if (failedItems.length) {
-                badge.textContent = 'GEO in asteptare';
-                badge.title = failedItems.map(item => item.reason || item.status || 'GEO nu exista inca').join('\n');
-                badge.style.backgroundColor = '#fffbe6';
-                badge.style.color = '#ad6800';
-                badge.style.border = '1px solid #ffe58f';
-            } else if (geoStatus.status && geoStatus.status !== 'not_found') {
-                badge.textContent = `SheetMetal agent: ${geoStatus.status}`;
-                badge.title = 'Agentul a vazut oferta, dar nu exista inca un .geo inregistrat.';
-                badge.style.backgroundColor = '#fffbe6';
-                badge.style.color = '#ad6800';
-                badge.style.border = '1px solid #ffe58f';
+            const offerId = geoStatus.offer_id || buildOffer().offer_id;
+            const toastKey = [
+                offerId,
+                geoStatus.status || '',
+                readyItems.map(item => item.target_path || item.targetPath || '').join('|'),
+                failedItems.map(item => item.reason || item.status || '').join('|')
+            ].join('::');
+
+            if (toastKey !== latestAgentGeoToastKey) {
+                latestAgentGeoToastKey = toastKey;
+                let badge = document.getElementById('xom-agent-geo');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.id = 'xom-agent-geo';
+                    Object.assign(badge.style, {
+                        padding: '10px 12px',
+                        borderRadius: '4px',
+                        fontSize: '13px',
+                        fontWeight: 'bold',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.12)'
+                    });
+                    container.appendChild(badge);
+                }
+
+                if (geoStatus.ok && first) {
+                    badge.textContent = readyItems.length === 1 ? 'GEO gata' : `GEO gata: ${readyItems.length}`;
+                    badge.title = JSON.stringify(readyItems, null, 2);
+                    badge.style.backgroundColor = '#f6ffed';
+                    badge.style.color = '#237804';
+                    badge.style.border = '1px solid #b7eb8f';
+                } else if (failedItems.length) {
+                    badge.textContent = 'GEO in asteptare';
+                    badge.title = failedItems.map(item => item.reason || item.status || 'GEO nu exista inca').join('\n');
+                    badge.style.backgroundColor = '#fffbe6';
+                    badge.style.color = '#ad6800';
+                    badge.style.border = '1px solid #ffe58f';
+                } else if (geoStatus.status && geoStatus.status !== 'not_found') {
+                    badge.textContent = `SheetMetal agent: ${geoStatus.status}`;
+                    badge.title = 'Agentul a vazut oferta, dar nu exista inca un .geo inregistrat.';
+                    badge.style.backgroundColor = '#fffbe6';
+                    badge.style.color = '#ad6800';
+                    badge.style.border = '1px solid #ffe58f';
+                } else {
+                    badge.textContent = 'SheetMetal agent: fara .geo';
+                    badge.title = 'Oferta nu are inca rezultat in XometryAnaliza.';
+                    badge.style.backgroundColor = '#f5f5f5';
+                    badge.style.color = '#595959';
+                    badge.style.border = '1px solid #d9d9d9';
+                }
+
+                showAllGeoLinks(geoStatus, latestAgentGeoSource, offerId);
+                clearTimeout(latestAgentGeoToastTimer);
+                latestAgentGeoToastTimer = setTimeout(() => {
+                    document.getElementById('xom-agent-geo')?.remove();
+                    document.getElementById('xom-agent-geo-list')?.remove();
+                }, 5000);
             } else {
-                badge.textContent = 'SheetMetal agent: fara .geo';
-                badge.title = 'Oferta nu are inca rezultat in XometryAnaliza.';
-                badge.style.backgroundColor = '#f5f5f5';
-                badge.style.color = '#595959';
-                badge.style.border = '1px solid #d9d9d9';
+                document.getElementById('xom-agent-geo')?.remove();
+                document.getElementById('xom-agent-geo-list')?.remove();
             }
 
-            const offerId = geoStatus.offer_id || buildOffer().offer_id;
-            showAllGeoLinks(geoStatus, latestAgentGeoSource, offerId);
             document.querySelectorAll('.ant-card-body').forEach(card => {
                 const partId = extractPartId(card.textContent || '');
                 if (partId) {
