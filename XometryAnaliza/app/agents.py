@@ -63,12 +63,13 @@ class SheetMetalLaserAgent:
         previous = load_job_state(job_id) or {}
         previous_sheet = previous.get("sheet_metal_laser") or {}
         previous_geo = previous_sheet.get("geo_items") or []
-        if previous_geo:
+        previous_ready_geo = [item for item in previous_geo if item.get("geo_exists") is True and item.get("target_path")]
+        if previous_ready_geo:
             append_event("sheet.geo.cached", f"Sheet agent already has GEO for {job_id}", job_id=job_id, offer_id=offer_id)
             return {
                 "agent": self.name,
                 "status": "cached",
-                "geo_items": previous_geo,
+                "geo_items": previous_ready_geo,
             }
 
         is_rfq_without_offer = job_id.upper().startswith("RFQ-") and (not offer_id or "/rfqs/" in url)

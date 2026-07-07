@@ -11,7 +11,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.55 Loaded (content_v20.js)");
+    log("Extension v2.56 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -57,7 +57,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.55</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.56</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -626,7 +626,7 @@
         const targetPath = matched?.item?.target_path || matched?.item?.targetPath;
         const geoExists = matched?.item?.geo_exists;
 
-        if (!matched || !targetPath || geoExists === false || !agentSource || !offerId || offerId === 'unknown') {
+        if (!matched || !targetPath || geoExists !== true || !agentSource || !offerId || offerId === 'unknown') {
             if (row) row.remove();
             return;
         }
@@ -952,13 +952,21 @@
             }
 
             const items = geoStatus.geo_items || [];
-            const first = items.find(item => item.target_path) || items[0];
-            if (geoStatus.ok && first && first.target_path) {
+            const readyItems = items.filter(item => (item.target_path || item.targetPath) && item.geo_exists === true);
+            const failedItems = items.filter(item => item.geo_exists === false);
+            const first = readyItems[0];
+            if (geoStatus.ok && first) {
                 badge.textContent = 'GEO gata';
-                badge.title = JSON.stringify(items, null, 2);
+                badge.title = JSON.stringify(readyItems, null, 2);
                 badge.style.backgroundColor = '#f6ffed';
                 badge.style.color = '#237804';
                 badge.style.border = '1px solid #b7eb8f';
+            } else if (failedItems.length) {
+                badge.textContent = 'GEO in asteptare';
+                badge.title = failedItems.map(item => item.reason || item.status || 'GEO nu exista inca').join('\n');
+                badge.style.backgroundColor = '#fffbe6';
+                badge.style.color = '#ad6800';
+                badge.style.border = '1px solid #ffe58f';
             } else if (geoStatus.status && geoStatus.status !== 'not_found') {
                 badge.textContent = `SheetMetal agent: ${geoStatus.status}`;
                 badge.title = 'Agentul a vazut oferta, dar nu exista inca un .geo inregistrat.';
