@@ -11,7 +11,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.56 Loaded (content_v20.js)");
+    log("Extension v2.57 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -57,7 +57,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.56</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.57</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -571,6 +571,26 @@
         ].filter(Boolean).join(' ').toLowerCase();
     }
 
+    function readyGeoEntries(items) {
+        return (items || [])
+            .map((item, index) => ({ item, index }))
+            .filter(entry => {
+                const targetPath = entry.item?.target_path || entry.item?.targetPath;
+                return entry.item && targetPath && entry.item.geo_exists === true;
+            });
+    }
+
+    function geoFileLabel(item, number) {
+        const targetPath = String(item?.target_path || item?.targetPath || '').trim();
+        const fileName = targetPath.split(/[\\/]/).pop();
+        const partName = String(item?.part_name || item?.partName || '').trim();
+        return fileName || partName || `GEO ${number}`;
+    }
+
+    function geoViewUrl(agentSource, offerId, itemIndex) {
+        return `${agentSource.replace(/\/$/, '')}/api/agents/geo/${encodeURIComponent(offerId)}/files/${itemIndex}/view`;
+    }
+
     function partNameFromCard(card) {
         const text = card.innerText || '';
         const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
@@ -582,9 +602,7 @@
     }
 
     function findGeoItemForPart(items, card, partId) {
-        const indexed = (items || [])
-            .map((item, index) => ({ item, index }))
-            .filter(entry => entry.item && (entry.item.target_path || entry.item.targetPath));
+        const indexed = readyGeoEntries(items);
 
         if (!indexed.length) return null;
 
@@ -624,9 +642,8 @@
         let row = card.querySelector('.xom-geo-row');
         const matched = findGeoItemForPart(geoStatus?.geo_items || [], card, partId);
         const targetPath = matched?.item?.target_path || matched?.item?.targetPath;
-        const geoExists = matched?.item?.geo_exists;
 
-        if (!matched || !targetPath || geoExists !== true || !agentSource || !offerId || offerId === 'unknown') {
+        if (!matched || !targetPath || !agentSource || !offerId || offerId === 'unknown') {
             if (row) row.remove();
             return;
         }
@@ -644,8 +661,8 @@
             }
         }
 
-        const url = `${agentSource.replace(/\/$/, '')}/api/agents/geo/${encodeURIComponent(offerId)}/files/${matched.index}/view`;
-        const fileName = targetPath.split(/[\\/]/).pop() || 'part.geo';
+        const url = geoViewUrl(agentSource, offerId, matched.index);
+        const fileName = geoFileLabel(matched.item, 1);
         row.innerHTML = '';
 
         const link = document.createElement('a');
@@ -656,6 +673,47 @@
         link.textContent = `GEO: ${fileName}`;
         link.title = targetPath;
         row.appendChild(link);
+    }
+
+    function showAllGeoLinks(geoStatus, agentSource, offerId) {
+        const container = document.getElementById('xom-backend-container');
+        if (!container) return;
+
+        let panel = document.getElementById('xom-agent-geo-list');
+        const entries = readyGeoEntries(geoStatus?.geo_items || []);
+        const canRender = entries.length && agentSource && offerId && offerId !== 'unknown';
+
+        if (!canRender) {
+            if (panel) panel.remove();
+            return;
+        }
+
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'xom-agent-geo-list';
+            container.appendChild(panel);
+        }
+
+        panel.innerHTML = '';
+        const title = document.createElement('div');
+        title.className = 'xom-agent-geo-title';
+        title.textContent = entries.length === 1 ? 'GEO disponibil' : `GEO disponibile: ${entries.length}`;
+        panel.appendChild(title);
+
+        const list = document.createElement('div');
+        list.className = 'xom-agent-geo-links';
+        entries.forEach((entry, index) => {
+            const targetPath = entry.item.target_path || entry.item.targetPath || '';
+            const link = document.createElement('a');
+            link.className = 'xom-agent-geo-link';
+            link.href = geoViewUrl(agentSource, offerId, entry.index);
+            link.target = '_blank';
+            link.rel = 'noreferrer';
+            link.title = targetPath;
+            link.textContent = `${index + 1}. ${geoFileLabel(entry.item, index + 1)}`;
+            list.appendChild(link);
+        });
+        panel.appendChild(list);
     }
 
     function injectCopyDimButton(card, dimText, l, w, rawL, rawW) {
@@ -952,11 +1010,11 @@
             }
 
             const items = geoStatus.geo_items || [];
-            const readyItems = items.filter(item => (item.target_path || item.targetPath) && item.geo_exists === true);
+            const readyItems = readyGeoEntries(items).map(entry => entry.item);
             const failedItems = items.filter(item => item.geo_exists === false);
             const first = readyItems[0];
             if (geoStatus.ok && first) {
-                badge.textContent = 'GEO gata';
+                badge.textContent = readyItems.length === 1 ? 'GEO gata' : `GEO gata: ${readyItems.length}`;
                 badge.title = JSON.stringify(readyItems, null, 2);
                 badge.style.backgroundColor = '#f6ffed';
                 badge.style.color = '#237804';
@@ -982,6 +1040,7 @@
             }
 
             const offerId = geoStatus.offer_id || buildOffer().offer_id;
+            showAllGeoLinks(geoStatus, latestAgentGeoSource, offerId);
             document.querySelectorAll('.ant-card-body').forEach(card => {
                 const partId = extractPartId(card.textContent || '');
                 if (partId) {

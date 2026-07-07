@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Xometry Price Calculator",
-  "version": "2.56",
+  "version": "2.57",
   "description": "Injects price calculation fields into Xometry Partner Portal job cards.",
   "icons": {
     "128": "icon.png"
