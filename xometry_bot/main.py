@@ -81,6 +81,12 @@ def run_iteration():
             f"{quote(str(offer_id))}/files/{item_index}/view"
         )
 
+    def _geo_file_label(item, number):
+        target_path = str(item.get("target_path") or item.get("targetPath") or "").strip()
+        filename = target_path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        part_name = str(item.get("part_name") or item.get("partName") or "").strip()
+        return filename or part_name or f"GEO {number}"
+
     def _fetch_geo_status(job):
         offer_id = job.get("offer_id")
         if not offer_id:
@@ -124,10 +130,13 @@ def run_iteration():
         geo_state_key = "geo:none"
         geo_ready_items = _geo_items(geo_status)
         if geo_ready_items and offer_id:
-            first_index, first_item = geo_ready_items[0]
-            geo_url = _geo_view_url(offer_id, first_index)
-            geo_line = f'Geo: <a href="{escape_html(geo_url)}">exista</a>\n'
-            geo_state_key = "geo_text_link_v2:" + "|".join(
+            geo_links = []
+            for number, (item_index, item) in enumerate(geo_ready_items, start=1):
+                geo_url = _geo_view_url(offer_id, item_index)
+                label = _geo_file_label(item, number)
+                geo_links.append(f'{number}. <a href="{escape_html(geo_url)}">{escape_html(label)}</a>')
+            geo_line = "Geo:\n" + "\n".join(geo_links) + "\n"
+            geo_state_key = "geo_links_all_v1:" + "|".join(
                 str(item.get("target_path") or item.get("targetPath") or "")
                 for _, item in geo_ready_items
             )
