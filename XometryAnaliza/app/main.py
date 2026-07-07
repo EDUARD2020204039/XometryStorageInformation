@@ -1,9 +1,10 @@
+import html
 from typing import Any
 from pathlib import PureWindowsPath
 from urllib.parse import quote
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .agents import process_jobs
@@ -62,6 +63,125 @@ def geo_status(offer_id: str) -> dict[str, Any]:
 
 @app.get("/api/agents/geo/{offer_id}/files/{item_index}")
 def geo_file(offer_id: str, item_index: int) -> Response:
+    _, target_path, content, filename = _read_geo_file(offer_id, item_index)
+    return Response(
+        content,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+        },
+    )
+
+
+@app.get("/api/agents/geo/{offer_id}/files/{item_index}/view")
+def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
+    state, target_path, content, filename = _read_geo_file(offer_id, item_index)
+    job = state.get("job") or {}
+    xometry_url = str(job.get("link") or job.get("url") or "")
+    download_url = f"/api/agents/geo/{quote(offer_id, safe='')}/files/{item_index}"
+    text = content.decode("utf-8", errors="replace")
+    safe_title = html.escape(filename)
+    safe_path = html.escape(str(target_path))
+    safe_content = html.escape(text)
+    safe_xometry_url = html.escape(xometry_url, quote=True)
+    xometry_button = (
+        f'<a class="button secondary" href="{safe_xometry_url}" target="_blank" rel="noreferrer">Deschide oferta Xometry</a>'
+        if xometry_url
+        else ""
+    )
+
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{safe_title}</title>
+  <style>
+    body {{
+      margin: 0;
+      background: #f4f6f8;
+      color: #111827;
+      font-family: Arial, sans-serif;
+    }}
+    header {{
+      position: sticky;
+      top: 0;
+      background: #ffffff;
+      border-bottom: 1px solid #d9e2ec;
+      padding: 14px 22px;
+      z-index: 1;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.25;
+    }}
+    .path {{
+      color: #4b5563;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }}
+    .actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }}
+    .button {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 4px;
+      background: #1677ff;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+    }}
+    .button.secondary {{
+      background: #ffffff;
+      border: 1px solid #b8c2cc;
+      color: #1f2937;
+    }}
+    main {{
+      padding: 18px 22px;
+    }}
+    pre {{
+      margin: 0;
+      padding: 16px;
+      border: 1px solid #d9e2ec;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #111827;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{safe_title}</h1>
+    <div class="path">{safe_path}</div>
+    <div class="actions">
+      <a class="button" href="{download_url}">Descarca .geo</a>
+      {xometry_button}
+    </div>
+  </header>
+  <main>
+    <pre>{safe_content}</pre>
+  </main>
+</body>
+</html>"""
+    )
+
+
+def _read_geo_file(offer_id: str, item_index: int) -> tuple[dict[str, Any], str, bytes, str]:
     state = find_job_by_offer_id(offer_id)
     if not state:
         raise HTTPException(status_code=404, detail="Offer not found in XometryAnaliza.")
@@ -84,11 +204,4 @@ def geo_file(offer_id: str, item_index: int) -> Response:
         raise HTTPException(status_code=502, detail=f"Could not read remote GEO file: {type(exc).__name__}: {exc}") from exc
 
     filename = PureWindowsPath(str(target_path)).name or f"{offer_id}-{item_index}.geo"
-    return Response(
-        content,
-        media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
-            "X-Geo-Path": str(target_path),
-        },
-    )
+    return state, str(target_path), content, filename

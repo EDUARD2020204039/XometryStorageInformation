@@ -11,7 +11,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.54 Loaded (content_v20.js)");
+    log("Extension v2.55 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -57,7 +57,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.54</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.55</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -644,7 +644,7 @@
             }
         }
 
-        const url = `${agentSource.replace(/\/$/, '')}/api/agents/geo/${encodeURIComponent(offerId)}/files/${matched.index}`;
+        const url = `${agentSource.replace(/\/$/, '')}/api/agents/geo/${encodeURIComponent(offerId)}/files/${matched.index}/view`;
         const fileName = targetPath.split(/[\\/]/).pop() || 'part.geo';
         row.innerHTML = '';
 
@@ -652,7 +652,7 @@
         link.className = 'xom-geo-btn';
         link.href = url;
         link.target = '_blank';
-        link.download = fileName;
+        link.rel = 'noreferrer';
         link.textContent = `GEO: ${fileName}`;
         link.title = targetPath;
         row.appendChild(link);
@@ -1282,7 +1282,7 @@
         });
 
         const h3 = document.createElement('h3');
-        h3.innerText = 'Extensions Updated! (v2.54)';
+        h3.innerText = 'Extensions Updated! (v2.55)';
         Object.assign(h3.style, { margin: '0 0 10px 0', color: '#1890ff' });
 
         const ul = document.createElement('ul');
