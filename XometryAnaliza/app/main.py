@@ -62,6 +62,209 @@ def geo_status(offer_id: str) -> dict[str, Any]:
     }
 
 
+@app.get("/api/agents/geo/{offer_id}/view")
+def geo_all_view(offer_id: str) -> HTMLResponse:
+    state = find_job_by_offer_id(offer_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Offer not found in XometryAnaliza.")
+
+    job = state.get("job") or {}
+    job_id = str(state.get("job_id") or job.get("id") or offer_id)
+    xometry_url = str(job.get("link") or job.get("url") or "")
+    sheet = state.get("sheet_metal_laser") or {}
+    geo_items = sheet.get("geo_items") or []
+    ready_indexes = [
+        index for index, item in enumerate(geo_items)
+        if item.get("geo_exists") is True and item.get("target_path")
+    ]
+
+    if not ready_indexes:
+        raise HTTPException(status_code=404, detail="No ready GEO files found for this offer.")
+
+    cards = []
+    for display_index, item_index in enumerate(ready_indexes, start=1):
+        try:
+            _, target_path, content, filename = _read_geo_file(offer_id, item_index)
+        except Exception as exc:
+            cards.append(
+                f"""
+                <section class="viewer error">
+                  <h2>GEO {display_index}</h2>
+                  <p>{html.escape(type(exc).__name__)}: {html.escape(str(exc))}</p>
+                </section>
+                """
+            )
+            continue
+
+        text = _decode_geo_text(content)
+        preview_svg, preview_stats = _geo_preview_svg(text)
+        dimensions = preview_stats.get("dimensions") or "necunoscut"
+        cut_count = preview_stats.get("cut_segments", 0)
+        bend_count = preview_stats.get("bend_segments", 0)
+        hole_count = preview_stats.get("holes", 0)
+        point_count = preview_stats.get("points", 0)
+        download_url = f"/api/agents/geo/{quote(offer_id, safe='')}/files/{item_index}"
+        cards.append(
+            f"""
+            <section class="viewer">
+              <div class="viewer-head">
+                <div>
+                  <h2>{display_index}. {html.escape(filename)}</h2>
+                  <div class="path">{html.escape(str(target_path))}</div>
+                  <div class="viewer-meta">{html.escape(dimensions)} · {cut_count} contururi · {hole_count} gauri · {bend_count} indoituri · {point_count} puncte</div>
+                </div>
+                <a class="button" href="{download_url}">Descarca .geo</a>
+              </div>
+              <div class="cad-frame">{preview_svg}</div>
+            </section>
+            """
+        )
+
+    xometry_button = (
+        f'<a class="button secondary" href="{html.escape(xometry_url, quote=True)}" target="_blank" rel="noreferrer">Deschide oferta Xometry</a>'
+        if xometry_url
+        else ""
+    )
+
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desfasurate GEO - {html.escape(job_id)}</title>
+  <style>
+    body {{
+      margin: 0;
+      background: #eef2f5;
+      color: #111827;
+      font-family: Arial, sans-serif;
+    }}
+    header {{
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: #ffffff;
+      border-bottom: 1px solid #d9e2ec;
+      padding: 14px 22px;
+    }}
+    h1 {{
+      margin: 0 0 6px;
+      font-size: 22px;
+    }}
+    h2 {{
+      margin: 0 0 5px;
+      font-size: 16px;
+    }}
+    .sub {{
+      color: #52606d;
+      font-size: 13px;
+    }}
+    .actions {{
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }}
+    .button {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 4px;
+      background: #1677ff;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }}
+    .button.secondary {{
+      background: #ffffff;
+      border: 1px solid #b8c2cc;
+      color: #1f2937;
+    }}
+    main {{
+      display: grid;
+      gap: 18px;
+      padding: 18px 22px 32px;
+    }}
+    .viewer {{
+      overflow: hidden;
+      border: 1px solid #cfd8e3;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }}
+    .viewer.error {{
+      padding: 16px;
+      border-color: #ffa39e;
+      background: #fff1f0;
+    }}
+    .viewer-head {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid #d9e2ec;
+      background: #f8fafc;
+    }}
+    .viewer-meta,
+    .path {{
+      color: #52606d;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }}
+    .cad-frame {{
+      height: 520px;
+      min-height: 420px;
+      background: #0b1120;
+    }}
+    .cad-empty {{
+      display: flex;
+      height: 100%;
+      align-items: center;
+      justify-content: center;
+      color: #dbeafe;
+      font-size: 15px;
+    }}
+    .geo-svg {{
+      display: block;
+      width: 100%;
+      height: 100%;
+      background:
+        radial-gradient(circle at 25% 18%, rgba(59, 130, 246, 0.18) 0, rgba(12, 18, 34, 0) 35%),
+        linear-gradient(145deg, #101827 0%, #070b14 100%);
+    }}
+    .geo-grid {{ stroke: rgba(148, 163, 184, 0.17); stroke-width: 0.25; }}
+    .geo-axis {{ stroke: rgba(148, 163, 184, 0.35); stroke-width: 0.45; }}
+    .geo-build-plate {{ fill: rgba(15, 23, 42, 0.18); stroke: rgba(148, 163, 184, 0.22); stroke-width: 0.5; vector-effect: non-scaling-stroke; }}
+    .geo-cut-shadow {{ fill: none; stroke: rgba(2, 6, 23, 0.80); stroke-width: 5.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }}
+    .geo-cut,
+    .geo-arc {{ fill: none; stroke: #f8fafc; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }}
+    .geo-hole {{ fill: rgba(15, 23, 42, 0.68); stroke: #93c5fd; stroke-width: 1.5; vector-effect: non-scaling-stroke; }}
+    .geo-bend {{ fill: none; stroke: #fbbf24; stroke-width: 1.7; stroke-dasharray: 6 5; stroke-linecap: round; vector-effect: non-scaling-stroke; }}
+    .geo-node {{ fill: #38bdf8; stroke: #0f172a; stroke-width: 0.8; vector-effect: non-scaling-stroke; }}
+    .geo-dim {{ stroke: #94a3b8; stroke-width: 0.8; vector-effect: non-scaling-stroke; }}
+    .geo-dim-text {{ fill: #cbd5e1; font-family: Arial, sans-serif; font-size: 4px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }}
+    .geo-watermark {{ fill: rgba(226, 232, 240, 0.42); font-family: Arial, sans-serif; font-size: 5px; font-weight: 700; letter-spacing: 0; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Desfasurate GEO - {html.escape(job_id)}</h1>
+    <div class="sub">{len(ready_indexes)} fisiere GEO generate pentru aceasta oferta</div>
+    <div class="actions">{xometry_button}</div>
+  </header>
+  <main>
+    {"".join(cards)}
+  </main>
+</body>
+</html>"""
+    )
+
+
 @app.get("/api/agents/geo/{offer_id}/files/{item_index}")
 def geo_file(offer_id: str, item_index: int) -> Response:
     _, target_path, content, filename = _read_geo_file(offer_id, item_index)
