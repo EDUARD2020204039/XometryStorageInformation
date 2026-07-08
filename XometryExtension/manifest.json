@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Xometry Price Calculator",
-  "version": "2.61",
+  "version": "2.62",
   "description": "Injects price calculation fields into Xometry Partner Portal job cards.",
   "icons": {
     "128": "icon.png"
@@ -24,10 +24,13 @@
     "https://partner.xometry.eu/*",
     "http://86.123.232.23:2222/*",
     "http://127.0.0.1:3333/*",
+    "http://192.168.2.23:10000/*",
     "http://86.123.232.23:10000/*",
+    "http://127.0.0.1:10000/*",
     "http://192.168.2.23:4468/*",
     "http://86.123.232.23:4468/*",
     "http://127.0.0.1:4468/*",
+    "ws://192.168.2.23:10000/*",
     "ws://86.123.232.23:10000/*"
   ],
   "background": {

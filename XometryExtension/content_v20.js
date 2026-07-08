@@ -1,4 +1,4 @@
-// Xometry Price Calculator Extension (v2.61)
+// Xometry Price Calculator Extension (v2.62)
 // Content Script v20 - Thickness Normalization
 
 (function () {
@@ -14,7 +14,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.61 Loaded (content_v20.js)");
+    log("Extension v2.62 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -60,7 +60,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.61</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.62</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -639,12 +639,13 @@
     function backendOfferUrl(source, backendUrl) {
         if (!backendUrl) return '#';
         if (/^https?:\/\//i.test(backendUrl)) return backendUrl;
-        return `${String(source || 'http://86.123.232.23:10000').replace(/\/$/, '')}${backendUrl}`;
+        return `${String(source || 'http://192.168.2.23:10000').replace(/\/$/, '')}${backendUrl}`;
     }
 
     function injectDosarTitleControls(status, source) {
         const title = findJobTitleElement();
-        if (!title || !status) return;
+        if (!title) return;
+        status = status || { has_dosar: false, current: null, references_with_dosar: [] };
 
         const container = titleActionContainer(title);
         let button = document.getElementById('xom-dosar-create-btn');
@@ -684,6 +685,14 @@
             ref.title = `${reference.title || reference.offer_id || ''}\n${reference.dosar_path || ''}`;
         } else if (ref) {
             ref.remove();
+        }
+    }
+
+    function ensureDosarTitleControls() {
+        const data = buildOffer();
+        if (!data || !data.offer_id || data.offer_id === "unknown") return;
+        if (!document.getElementById('xom-dosar-create-btn')) {
+            injectDosarTitleControls({ has_dosar: false, current: null, references_with_dosar: [] }, 'http://192.168.2.23:10000');
         }
     }
 
@@ -1230,6 +1239,7 @@
         try {
             const data = buildOffer();
             if (!data || !data.offer_id || data.offer_id === "unknown") return;
+            ensureDosarTitleControls();
             const key = [
                 data.offer_id,
                 data.job_name || '',
@@ -1237,7 +1247,10 @@
             ].join('::');
             if (!force && key === latestDosarStatusKey) return;
             chrome.runtime.sendMessage({ action: "GET_DOSAR_STATUS", offerData: data }, (response) => {
-                if (chrome.runtime.lastError || !response || !response.success) return;
+                if (chrome.runtime.lastError || !response || !response.success) {
+                    ensureDosarTitleControls();
+                    return;
+                }
                 latestDosarStatusKey = key;
                 injectDosarTitleControls(response.data, response.source);
             });
@@ -1354,6 +1367,7 @@
     setInterval(() => BackendUI.ensureButton(), 2000);
     setInterval(() => refreshAgentGeo(), 5000);
     setInterval(() => refreshDosarStatus(), 7000);
+    setInterval(() => ensureDosarTitleControls(), 3000);
 
     // --- Download Features ---
     function injectDownloadOverlayRibbon() {

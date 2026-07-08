@@ -5,12 +5,44 @@ console.log("[BG] Service Worker Loaded");
 const API_BASE = "http://86.123.232.23:2222/api";
 const API_KEY = "stoc_0f6a9b2c7d1e4f3a8c5b9d0e2a6f7c1b";
 const LOG_SERVER = "http://127.0.0.1:3333";
-const BACKEND_URL = "http://86.123.232.23:10000";
+const BACKEND_URLS = [
+    "http://192.168.2.23:10000",
+    "http://86.123.232.23:10000",
+    "http://127.0.0.1:10000"
+];
+const BACKEND_URL = BACKEND_URLS[0];
 const AGENT_URLS = [
     "http://192.168.2.23:4468",
     "http://86.123.232.23:4468",
     "http://127.0.0.1:4468"
 ];
+
+async function fetchBackend(path, options = {}) {
+    const { timeout = 10000, ...fetchOptions } = options;
+    let lastError = "Backend unavailable";
+
+    for (const baseUrl of BACKEND_URLS) {
+        const url = /^https?:\/\//i.test(path)
+            ? path
+            : `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        try {
+            const resp = await fetch(url, {
+                ...fetchOptions,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            return { resp, baseUrl, url };
+        } catch (e) {
+            clearTimeout(timeoutId);
+            lastError = `${baseUrl}: ${e.message}`;
+            logToLocalServer(`Backend fallback: ${lastError}`);
+        }
+    }
+
+    throw new Error(lastError);
+}
 
 // --- WebSocket Analysis Manager (Background) ---
 const AnalysisManager = {
@@ -224,13 +256,9 @@ async function checkJobHistory(jobIdString, excludeOfferId) {
 
     logToLocalServer(`Checking History for Root: ${rootId}, Excluding: ${excludeOfferId}`);
 
-    const url = `${BACKEND_URL}/api/offers`;
+    const url = "/api/offers";
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        const resp = await fetch(url, { method: 'GET', signal: controller.signal });
-        clearTimeout(timeoutId);
+        const { resp } = await fetchBackend(url, { method: 'GET', timeout: 10000 });
 
         if (!resp.ok) throw new Error(`Fetch error: ${resp.status}`);
 
@@ -335,15 +363,13 @@ async function getDosarStatus(offerData) {
     const partIds = partIdsForDosar(offerData);
     if (partIds) url.searchParams.set("part_ids", partIds);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
-        const resp = await fetch(url.toString(), { method: "GET", signal: controller.signal });
+        const { resp, baseUrl } = await fetchBackend(`${url.pathname}${url.search}`, { method: "GET", timeout: 10000 });
         const data = await resp.json();
         if (!resp.ok) return { success: false, error: data.detail || `HTTP ${resp.status}` };
-        return { success: true, data, source: BACKEND_URL };
-    } finally {
-        clearTimeout(timeoutId);
+        return { success: true, data, source: baseUrl };
+    } catch (e) {
+        return { success: false, error: e.message };
     }
 }
 
@@ -351,38 +377,32 @@ async function createDosar(offerData) {
     const offerId = offerData.offer_id;
     if (!offerId || offerId === "unknown") return { success: false, error: "Missing offer_id" };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
-        const resp = await fetch(`${BACKEND_URL}/api/xometry/dosar/${encodeURIComponent(offerId)}/create`, {
+        const { resp, baseUrl } = await fetchBackend(`/api/xometry/dosar/${encodeURIComponent(offerId)}/create`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(offerData),
-            signal: controller.signal
+            timeout: 30000
         });
         const data = await resp.json();
         if (!resp.ok) return { success: false, error: data.detail || `HTTP ${resp.status}`, data };
-        return { success: true, data, source: BACKEND_URL };
-    } finally {
-        clearTimeout(timeoutId);
+        return { success: true, data, source: baseUrl };
+    } catch (e) {
+        return { success: false, error: e.message };
     }
 }
 
 async function postToBackend(payload) {
-    const url = `${BACKEND_URL}/api/scrape`;
+    const url = "/api/scrape";
     logToLocalServer(`POST -> backend ${url}`);
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        const resp = await fetch(url, {
+        const { resp } = await fetchBackend(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
-            signal: controller.signal
+            timeout: 10000
         });
-        clearTimeout(timeoutId);
 
         let data = null;
         try { data = await resp.json(); } catch { }
@@ -407,11 +427,11 @@ async function postToBackend(payload) {
 async function downloadDocumentation(payload) {
     const { offerId, downloadUrl, fileName } = payload;
     // Uses the backend to perform the download/store logic
-    const url = `${BACKEND_URL}/api/download-docs`;
+    const url = "/api/download-docs";
     logToLocalServer(`Download Request: ${fileName} from ${downloadUrl}`);
 
     try {
-        const resp = await fetch(url, {
+        const { resp } = await fetchBackend(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -419,7 +439,8 @@ async function downloadDocumentation(payload) {
                 download_url: downloadUrl,
                 file_name: fileName,
                 page_type: "job" // Assumption
-            })
+            }),
+            timeout: 30000
         });
 
         let data = null;
@@ -432,17 +453,13 @@ async function downloadDocumentation(payload) {
 }
 
 async function checkOfferExists(offerId) {
-    const url = `${BACKEND_URL}/api/offers`;
+    const url = "/api/offers";
     logToLocalServer(`Checking existence via list: ${url} for ${offerId}`);
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s for list fetch
-
-        const resp = await fetch(url, {
+        const { resp } = await fetchBackend(url, {
             method: 'GET',
-            signal: controller.signal
+            timeout: 10000
         });
-        clearTimeout(timeoutId);
 
         if (!resp.ok) {
             logToLocalServer(`List fetch error: ${resp.status}`);
@@ -468,7 +485,7 @@ async function checkOfferExists(offerId) {
 }
 
 async function triggerAnalysis(partId) {
-    const url = `${BACKEND_URL}/api/extension/analyze`;
+    const url = "/api/extension/analyze";
     logToLocalServer(`Triggering Analysis for Part ${partId}`);
 
     // Broadcast debug helper (needs to find a tabId, let's try to query active)
@@ -481,10 +498,11 @@ async function triggerAnalysis(partId) {
         // Ensure part_id is a number (integer) for the backend
         const numericPartId = parseInt(partId, 10);
 
-        const resp = await fetch(url, {
+        const { resp } = await fetchBackend(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ part_id: numericPartId })
+            body: JSON.stringify({ part_id: numericPartId }),
+            timeout: 30000
         });
 
         if (!resp.ok) {
