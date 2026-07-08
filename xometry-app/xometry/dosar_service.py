@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -63,6 +64,19 @@ class DosarService:
         }
 
     def create_dosar_folder(self, dosar_id: int, folder_name: str) -> dict[str, Any]:
+        root_path = Path(os.getenv("DOSAR_ROOT_PATH", "/mnt/xLucru"))
+        if root_path.exists():
+            folder = root_path / folder_name
+            folder.mkdir(parents=True, exist_ok=True)
+            return {
+                "success": True,
+                "dosar_id": dosar_id,
+                "folder_name": folder_name,
+                "path_linux": str(folder),
+                "path_windows": f"X:\\{folder_name}",
+                "response": {"result": "OK", "message": "Created locally"},
+            }
+
         if not self.folder_enabled:
             return {
                 "success": True,

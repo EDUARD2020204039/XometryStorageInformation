@@ -1099,6 +1099,20 @@ async def create_xometry_dosar(
         if not result.get("success"):
             raise HTTPException(status_code=502, detail=result.get("error") or "Nu s-a putut crea dosarul")
 
+        workspace = None
+        try:
+            from xometry.workspace_service import create_xometry_workspace, download_document_links
+            document_download = download_document_links(offer.offer_id, payload.get("documentation_links") or [])
+            result["document_download"] = document_download
+            workspace = create_xometry_workspace(result["folder_name"], offer.offer_id, metadata)
+            result["workspace"] = workspace
+        except Exception as workspace_error:
+            logger.error("Could not populate Xometry workspace: %s", workspace_error)
+            result["workspace"] = {
+                "success": False,
+                "error": str(workspace_error),
+            }
+
         offer.dosar_id = result["dosar_id"]
         offer.dosar_path = result.get("path_linux") or result.get("path_windows")
         offer.dosar_allocated = datetime.utcnow()

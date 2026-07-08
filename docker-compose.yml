@@ -35,12 +35,15 @@ services:
     environment:
       PORT: "10000"
       DATABASE_URL: "sqlite:////app/data/xometry_offers.db"
+      DOSAR_ROOT_PATH: "/mnt/xLucru"
+      XOMETRY_AGENT_URL: "http://xometryanaliza:4468"
     volumes:
       - app_data:/app/data
       - app_images:/app/static/images
       - app_docs:/app/static/docs
       - app_devize:/app/static/devize
       - app_exports:/app/exports
+      - /mnt/xLucru:/mnt/xLucru
 
   xometrybot-scraper:
     build:

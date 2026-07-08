@@ -1,4 +1,4 @@
-// Xometry Price Calculator Extension (v2.63)
+// Xometry Price Calculator Extension (v2.64)
 // Content Script v20 - Thickness Normalization
 
 (function () {
@@ -14,7 +14,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.63 Loaded (content_v20.js)");
+    log("Extension v2.64 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -60,7 +60,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.63</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.64</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -1331,8 +1331,28 @@
             title: jobId, // duplicate for backend safety
             url: window.location.href,
             page_text: (document.body?.innerText || '').slice(0, 10000),
+            documentation_links: collectDocumentationLinks(offerId, jobId),
             parts: parts
         };
+    }
+
+    function collectDocumentationLinks(offerId, jobId) {
+        const seen = new Set();
+        return Array.from(document.querySelectorAll('a[href*="download_zip"]'))
+            .map((link, index) => {
+                const url = link.href;
+                if (!url || seen.has(url)) return null;
+                seen.add(url);
+                const label = (link.innerText || link.getAttribute('aria-label') || '').trim();
+                const base = label.toLowerCase().includes('drawing') ? 'drawings' : 'job-files';
+                return {
+                    url,
+                    label: label || base,
+                    filename: `Doc ${jobId || offerId} ${index + 1} ${base}.zip`
+                };
+            })
+            .filter(Boolean)
+            .slice(0, 10);
     }
 
     function parsePartCard(card) {
