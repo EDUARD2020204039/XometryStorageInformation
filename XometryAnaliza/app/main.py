@@ -99,6 +99,7 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
         text = _decode_geo_text(content)
         preview_svg, preview_stats = _geo_preview_svg(text)
         dimensions = preview_stats.get("dimensions") or "necunoscut"
+        thickness = preview_stats.get("thickness") or "necunoscuta"
         cut_count = preview_stats.get("cut_segments", 0)
         bend_count = preview_stats.get("bend_segments", 0)
         hole_count = preview_stats.get("holes", 0)
@@ -108,9 +109,17 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
             f"""
             <section class="viewer">
               <div class="viewer-head">
-                <div>
+                <div class="viewer-info">
                   <h2>{display_index}. {html.escape(filename)}</h2>
                   <div class="path">{html.escape(str(target_path))}</div>
+                  <div class="stats-grid">
+                    <div class="stat-box"><strong>{html.escape(dimensions)}</strong><span>Dimensiuni</span></div>
+                    <div class="stat-box"><strong>{html.escape(thickness)}</strong><span>Grosime</span></div>
+                    <div class="stat-box"><strong>{cut_count}</strong><span>Contururi</span></div>
+                    <div class="stat-box"><strong>{hole_count}</strong><span>Gauri</span></div>
+                    <div class="stat-box"><strong>{bend_count}</strong><span>Indoituri</span></div>
+                    <div class="stat-box"><strong>{point_count}</strong><span>Puncte</span></div>
+                  </div>
                   <div class="viewer-meta">{html.escape(dimensions)} · {cut_count} contururi · {hole_count} gauri · {bend_count} indoituri · {point_count} puncte</div>
                 </div>
                 <a class="button" href="{download_url}">Descarca .geo</a>
@@ -210,7 +219,43 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
       border-bottom: 1px solid #d9e2ec;
       background: #f8fafc;
     }}
-    .viewer-meta,
+    .viewer-info {{
+      flex: 1;
+      min-width: 0;
+    }}
+    .viewer-meta {{
+      display: none;
+    }}
+    .stats-grid {{
+      display: grid;
+      grid-template-columns: repeat(6, minmax(96px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }}
+    .stat-box {{
+      min-height: 52px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background: #ffffff;
+      padding: 8px 10px;
+      box-sizing: border-box;
+    }}
+    .stat-box strong {{
+      display: block;
+      color: #0f172a;
+      font-size: 19px;
+      line-height: 22px;
+      white-space: nowrap;
+    }}
+    .stat-box span {{
+      display: block;
+      margin-top: 4px;
+      color: #52606d;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }}
     .path {{
       color: #52606d;
       font-size: 12px;
@@ -249,6 +294,14 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
     .geo-dim {{ stroke: #94a3b8; stroke-width: 0.8; vector-effect: non-scaling-stroke; }}
     .geo-dim-text {{ fill: #cbd5e1; font-family: Arial, sans-serif; font-size: 4px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }}
     .geo-watermark {{ fill: rgba(226, 232, 240, 0.42); font-family: Arial, sans-serif; font-size: 5px; font-weight: 700; letter-spacing: 0; }}
+    @media (max-width: 900px) {{
+      .viewer-head {{
+        flex-direction: column;
+      }}
+      .stats-grid {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }}
+    }}
   </style>
 </head>
 <body>
@@ -291,6 +344,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
     safe_preview_svg = preview_svg
     safe_xometry_url = html.escape(xometry_url, quote=True)
     dimensions = preview_stats.get("dimensions") or "necunoscut"
+    thickness = preview_stats.get("thickness") or "necunoscuta"
     cut_count = preview_stats.get("cut_segments", 0)
     bend_count = preview_stats.get("bend_segments", 0)
     hole_count = preview_stats.get("holes", 0)
@@ -425,7 +479,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
     }}
     .metric-grid {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(88px, 1fr));
+      grid-template-columns: repeat(5, minmax(88px, 1fr));
       gap: 8px;
       color: #475569;
       font-size: 12px;
@@ -608,6 +662,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
       <div class="tool-row">
         <div class="metric-grid">
           <div class="metric"><strong>{html.escape(dimensions)}</strong>Dimensiuni</div>
+          <div class="metric"><strong>{html.escape(thickness)}</strong>Grosime</div>
           <div class="metric"><strong>{cut_count}</strong>Contururi</div>
           <div class="metric"><strong>{hole_count}</strong>Gauri</div>
           <div class="metric"><strong>{bend_count}</strong>Indoituri</div>
@@ -737,6 +792,27 @@ def _point_from_line(value: str) -> tuple[float, float] | None:
         return None
 
 
+def _format_mm(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".") + " mm"
+
+
+def _geo_thickness_from_lines(lines: list[str]) -> str:
+    for index, line in enumerate(lines):
+        if line.upper() != "NONE":
+            continue
+        for next_line in lines[index + 1:index + 7]:
+            parts = next_line.split()
+            if not parts:
+                continue
+            try:
+                value = float(parts[0])
+            except ValueError:
+                continue
+            if 0 < value <= 100:
+                return _format_mm(value)
+    return "necunoscuta"
+
+
 def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
     lines = [line.strip() for line in text.splitlines()]
     points: dict[int, tuple[float, float]] = {}
@@ -787,6 +863,7 @@ def _geo_preview_svg(text: str) -> tuple[str, dict[str, Any]]:
         "bend_segments": len(bend_segments),
         "holes": len(cut_circles),
         "dimensions": "necunoscut",
+        "thickness": _geo_thickness_from_lines(lines),
     }
 
     if not used_points:
