@@ -19,6 +19,7 @@ class DosarService:
         self.api_token = api_token if api_token is not None else os.getenv("DOSAR_API_TOKEN", "api_token_abc123")
         self.headers = {"Authorization": f"Bearer {self.api_token}"} if self.api_token else {}
         self.folder_enabled = os.getenv("DOSAR_FOLDER_ENABLED", "true").lower() in ("1", "true", "yes")
+        self.folder_required = os.getenv("DOSAR_FOLDER_REQUIRED", "false").lower() in ("1", "true", "yes")
         self.odoo_required = os.getenv("ODOO_DOSAR_REQUIRED", "false").lower() in ("1", "true", "yes")
 
     def get_latest_dosar_id(self) -> int | None:
@@ -35,7 +36,31 @@ class DosarService:
             return dosar_id
         except Exception as e:
             logger.error("Could not read latest dosar ID: %s", e)
+            try:
+                client = OdooClient()
+                if client.configured:
+                    dosar_id = client.get_latest_dosar_id()
+                    if dosar_id:
+                        logger.info("Latest Odoo dosar ID fallback: %s", dosar_id)
+                        return dosar_id
+            except Exception as odoo_error:
+                logger.error("Could not read latest Odoo dosar ID: %s", odoo_error)
             return None
+
+    def preview_next_dosar(self) -> dict[str, Any]:
+        latest_id = self.get_latest_dosar_id()
+        if latest_id is None:
+            return {"success": False, "error": "Could not read latest dosar ID"}
+
+        next_id = latest_id + 1
+        folder_name = f"{next_id}_XOMETRY"
+        return {
+            "success": True,
+            "dosar_id": str(next_id),
+            "folder_name": folder_name,
+            "path_linux": f"/mnt/xLucru/{folder_name}",
+            "path_windows": f"X:\\{folder_name}",
+        }
 
     def create_dosar_folder(self, dosar_id: int, folder_name: str) -> dict[str, Any]:
         if not self.folder_enabled:
@@ -127,6 +152,18 @@ class DosarService:
 
             folder_result = self.create_dosar_folder(new_dosar_id, folder_name)
             if not folder_result.get("success"):
+                if odoo_result.get("success") and not self.folder_required:
+                    return {
+                        "success": True,
+                        "dosar_id": str(new_dosar_id),
+                        "folder_name": folder_name,
+                        "path_linux": f"/mnt/xLucru/{folder_name}",
+                        "path_windows": f"X:\\{folder_name}",
+                        "allocated_at": datetime.utcnow().isoformat(),
+                        "odoo": odoo_result,
+                        "folder": folder_result,
+                        "warning": f"Folder not created: {folder_result.get('error')}",
+                    }
                 return {**folder_result, "odoo": odoo_result}
 
             return {

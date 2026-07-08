@@ -290,3 +290,36 @@
   background: #f6ffed;
   color: #237804;
 }
+
+#xom-dosar-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fafafa;
+  color: #262626;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+#xom-dosar-state.new {
+  border-color: #91d5ff;
+  background: #e6f7ff;
+  color: #0050b3;
+}
+
+#xom-dosar-state.existing {
+  border-color: #95de64;
+  background: #f6ffed;
+  color: #237804;
+}
+
+#xom-dosar-state.reference {
+  border-color: #ffd666;
+  background: #fffbe6;
+  color: #ad6800;
+}

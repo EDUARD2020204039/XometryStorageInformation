@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Any
 
 import requests
@@ -109,3 +110,40 @@ class OdooClient:
             "url": f"{self.base_url}/odoo/action-{self.action_id}/{model}/{record_id}" if record_id else self.base_url,
             "values": values,
         }
+
+    def get_latest_dosar_id(self) -> int | None:
+        uid = self.authenticate()
+        model = self.model
+        if not model:
+            action = self.load_dosar_action()
+            model = action.get("res_model") or ""
+        if not model:
+            raise RuntimeError("Nu stiu modelul Odoo pentru dosar. Completeaza ODOO_DOSAR_MODEL dupa discovery.")
+
+        id_field = os.getenv("ODOO_DOSAR_ID_FIELD", "")
+        fields = [self.name_field]
+        if id_field:
+            fields.append(id_field)
+
+        records = self._jsonrpc(
+            "object",
+            "execute_kw",
+            [self.db, uid, self.password, model, "search_read", [[], fields], {"limit": 200, "order": "id desc"}],
+        ) or []
+
+        latest: int | None = None
+        for record in records:
+            candidates = []
+            if id_field:
+                candidates.append(record.get(id_field))
+            candidates.append(record.get(self.name_field))
+
+            for value in candidates:
+                if value in (None, False, ""):
+                    continue
+                match = re.search(r"\d+", str(value))
+                if match:
+                    number = int(match.group(0))
+                    latest = number if latest is None else max(latest, number)
+
+        return latest

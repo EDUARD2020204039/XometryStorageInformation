@@ -1,4 +1,4 @@
-// Xometry Price Calculator Extension (v2.62)
+// Xometry Price Calculator Extension (v2.63)
 // Content Script v20 - Thickness Normalization
 
 (function () {
@@ -14,7 +14,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.62 Loaded (content_v20.js)");
+    log("Extension v2.63 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -60,7 +60,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.62</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.63</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -657,21 +657,48 @@
             container.appendChild(button);
         }
 
+        let state = document.getElementById('xom-dosar-state');
+        if (!state) {
+            state = document.createElement('span');
+            state.id = 'xom-dosar-state';
+            container.appendChild(state);
+        }
+
         const current = status.current || null;
+        const currentName = dosarDisplayName(current);
+        const reference = (status.references_with_dosar || [])[0];
+        const referenceName = dosarDisplayName(reference);
+        const nextName = dosarDisplayName(status.next_dosar);
+
         if (status.has_dosar && current?.dosar_id) {
-            button.textContent = `Dosar ${current.dosar_id}`;
+            button.textContent = `Dosar ${currentName || current.dosar_id}`;
             button.title = current.dosar_path || 'Dosar creat';
             button.disabled = true;
             button.classList.add('xom-dosar-created');
+            state.textContent = `Exista: ${currentName || current.dosar_id}`;
+            state.title = current.dosar_path || 'Oferta are deja dosar';
+            state.className = 'xom-dosar-state existing';
         } else {
             button.textContent = 'Creeaza dosar';
-            button.title = 'Creeaza dosar pentru oferta curenta';
+            button.title = nextName ? `Creeaza dosar ${nextName}` : 'Creeaza dosar pentru oferta curenta';
             button.disabled = false;
             button.classList.remove('xom-dosar-created');
+            if (referenceName) {
+                state.textContent = `Exista in ref: ${referenceName}`;
+                state.title = `${reference.title || reference.offer_id || ''}\n${reference.dosar_path || ''}`;
+                state.className = 'xom-dosar-state reference';
+            } else if (nextName) {
+                state.textContent = `Nou: ${nextName}`;
+                state.title = 'Urmatorul dosar care se va crea';
+                state.className = 'xom-dosar-state new';
+            } else {
+                state.textContent = 'Nou';
+                state.title = status.next_dosar?.error || 'Nu exista dosar gasit';
+                state.className = 'xom-dosar-state new';
+            }
         }
 
         let ref = document.getElementById('xom-dosar-reference');
-        const reference = (status.references_with_dosar || [])[0];
         if (reference && reference.dosar_id) {
             if (!ref) {
                 ref = document.createElement('a');
@@ -681,11 +708,21 @@
                 container.appendChild(ref);
             }
             ref.href = backendOfferUrl(source, reference.backend_url);
-            ref.textContent = `Ref dosar ${reference.dosar_id}`;
+            ref.textContent = `Ref ${referenceName || reference.dosar_id}`;
             ref.title = `${reference.title || reference.offer_id || ''}\n${reference.dosar_path || ''}`;
         } else if (ref) {
             ref.remove();
         }
+    }
+
+    function dosarDisplayName(item) {
+        if (!item) return '';
+        return String(
+            item.dosar_name ||
+            item.folder_name ||
+            item.name ||
+            (item.dosar_id ? `${item.dosar_id}_XOMETRY` : '')
+        ).trim();
     }
 
     function ensureDosarTitleControls() {

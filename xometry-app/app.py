@@ -341,7 +341,19 @@ def _offer_public_url(offer: Offer) -> str:
     return f"/offer/{offer.id}"
 
 
+def _dosar_display_name(dosar_id: str | None, dosar_path: str | None) -> str | None:
+    if dosar_path:
+        normalized = str(dosar_path).replace("\\", "/").rstrip("/")
+        folder = normalized.rsplit("/", 1)[-1]
+        if folder:
+            return folder
+    if dosar_id:
+        return f"{dosar_id}_XOMETRY"
+    return None
+
+
 def _offer_dosar_payload(offer: Offer, reason: str = "") -> dict:
+    dosar_name = _dosar_display_name(offer.dosar_id, offer.dosar_path)
     return {
         "id": offer.id,
         "offer_id": offer.offer_id,
@@ -349,6 +361,8 @@ def _offer_dosar_payload(offer: Offer, reason: str = "") -> dict:
         "url": offer.url,
         "backend_url": _offer_public_url(offer),
         "dosar_id": offer.dosar_id,
+        "dosar_name": dosar_name,
+        "folder_name": dosar_name,
         "dosar_path": offer.dosar_path,
         "dosar_allocated": offer.dosar_allocated.isoformat() if offer.dosar_allocated else None,
         "has_dosar": bool(offer.dosar_id),
@@ -998,6 +1012,17 @@ async def get_xometry_dosar_status(
         parsed_part_ids = _part_ids_from_raw(part_ids)
         references = _find_dosar_references(db, offer, external_offer_id, job_id, parsed_part_ids)
         references_with_dosar = [item for item in references if item.get("has_dosar")]
+        next_dosar = None
+        if not (offer and offer.dosar_id):
+            try:
+                from xometry.dosar_service import DosarService
+                preview = DosarService().preview_next_dosar()
+                if preview.get("success"):
+                    next_dosar = preview
+                else:
+                    next_dosar = {"success": False, "error": preview.get("error")}
+            except Exception as preview_error:
+                next_dosar = {"success": False, "error": str(preview_error)}
 
         return {
             "success": True,
@@ -1007,6 +1032,8 @@ async def get_xometry_dosar_status(
             "offer_found": bool(offer),
             "current": _offer_dosar_payload(offer, "current") if offer else None,
             "has_dosar": bool(offer and offer.dosar_id),
+            "state": "existing" if offer and offer.dosar_id else "new",
+            "next_dosar": next_dosar,
             "references": references[:10],
             "references_with_dosar": references_with_dosar[:10],
         }
@@ -1076,6 +1103,7 @@ async def create_xometry_dosar(
         offer.dosar_path = result.get("path_linux") or result.get("path_windows")
         offer.dosar_allocated = datetime.utcnow()
         db.commit()
+        db.refresh(offer)
 
         return {
             "success": True,
