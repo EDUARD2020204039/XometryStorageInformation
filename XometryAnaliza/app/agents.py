@@ -9,6 +9,17 @@ from .store import append_event, load_job_state, save_job_state
 from .telegram_log import send_log
 from .xometry_backend_client import lookup_dosar_references
 
+SHEET_KEYWORDS = (
+    "sheet",
+    "sheet metal",
+    "metal sheet",
+    "laser",
+    "laser cutting",
+    "bending",
+    "tabla",
+    "tablă",
+)
+
 
 def _text(job: dict[str, Any]) -> str:
     fields = [
@@ -29,13 +40,67 @@ def _job_id(job: dict[str, Any]) -> str:
     return str(job.get("id") or job.get("job_id") or job.get("title") or job.get("offer_id") or "unknown")
 
 
+def _part_process_text(part: dict[str, Any]) -> str:
+    values = [
+        part.get("process"),
+        part.get("processType"),
+        part.get("process_type"),
+        part.get("material"),
+        part.get("part_name"),
+        part.get("name"),
+    ]
+    processes = part.get("processes")
+    if isinstance(processes, list):
+        values.extend(processes)
+    elif processes:
+        values.append(processes)
+    return " ".join(str(value or "") for value in values).lower()
+
+
+def _sheet_part_ids(job: dict[str, Any]) -> set[str]:
+    ids: set[str] = set()
+    for part in job.get("parts") or []:
+        if not isinstance(part, dict):
+            continue
+        if not any(keyword in _part_process_text(part) for keyword in SHEET_KEYWORDS):
+            continue
+        part_id = str(part.get("part_id") or part.get("id") or "").strip()
+        if part_id:
+            ids.add(part_id.lower())
+            digits = "".join(ch for ch in part_id if ch.isdigit())
+            if digits:
+                ids.add(digits.lower())
+    return ids
+
+
+def _geo_item_text(item: dict[str, Any]) -> str:
+    return " ".join(
+        str(item.get(key) or "")
+        for key in ("part_id", "part_name", "partName", "target_path", "targetPath")
+    ).lower()
+
+
+def _filter_geo_items_for_sheet_parts(job: dict[str, Any], geo_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sheet_ids = _sheet_part_ids(job)
+    if not sheet_ids:
+        return geo_items
+
+    filtered = []
+    for item in geo_items:
+        text = _geo_item_text(item)
+        matched = [part_id for part_id in sheet_ids if part_id and part_id in text]
+        if matched:
+            filtered.append({**item, "sheet_relevant": True, "matched_sheet_part_ids": sorted(set(matched))})
+    return filtered
+
+
 class RouterAgent:
     def route(self, job: dict[str, Any]) -> list[str]:
         text = _text(job)
         agents = []
         if any(token in text for token in ("cnc", "milling", "turning", "machining")):
             agents.append("cnc")
-        if any(token in text for token in ("sheet", "sheet metal", "metal sheet", "laser", "bending", "tabla")):
+        if any(token in text for token in SHEET_KEYWORDS):
             agents.append("sheet_metal_laser")
         return agents
 
@@ -64,13 +129,17 @@ class SheetMetalLaserAgent:
         previous = load_job_state(job_id) or {}
         previous_sheet = previous.get("sheet_metal_laser") or {}
         previous_geo = previous_sheet.get("geo_items") or []
-        previous_ready_geo = [item for item in previous_geo if item.get("geo_exists") is True and item.get("target_path")]
+        previous_ready_geo = _filter_geo_items_for_sheet_parts(
+            job,
+            [item for item in previous_geo if item.get("geo_exists") is True and item.get("target_path")],
+        )
         if previous_ready_geo:
             append_event("sheet.geo.cached", f"Sheet agent already has GEO for {job_id}", job_id=job_id, offer_id=offer_id)
             return {
                 "agent": self.name,
                 "status": "cached",
                 "geo_items": previous_ready_geo,
+                "matched_sheet_part_ids": sorted(_sheet_part_ids(job)),
             }
 
         is_rfq_without_offer = job_id.upper().startswith("RFQ-") and (not offer_id or "/rfqs/" in url)
@@ -119,13 +188,14 @@ class SheetMetalLaserAgent:
 
         try:
             result = run_ofertare_automata(job)
-            geo_items = extract_geo_items(result)
+            geo_items = _filter_geo_items_for_sheet_parts(job, extract_geo_items(result))
             status = "geo_ready" if any(item.get("geo_exists") for item in geo_items) else "geo_requested"
             output = {
                 "agent": self.name,
                 "status": status,
                 "ofertare_result": result,
                 "geo_items": geo_items,
+                "matched_sheet_part_ids": sorted(_sheet_part_ids(job)),
                 "completed_ts": time.time(),
             }
             append_event("sheet.done", f"Sheet agent finished {job_id}: {status}", job_id=job_id, offer_id=offer_id, geo_items=geo_items)

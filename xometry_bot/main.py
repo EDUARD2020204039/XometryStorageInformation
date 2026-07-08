@@ -66,13 +66,53 @@ def run_iteration():
     def escape_html(text):
         return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    def _geo_items(geo_status):
+    def _sheet_part_ids(job):
+        ids = set()
+        for part in job.get("parts") or []:
+            if not isinstance(part, dict):
+                continue
+            values = [
+                part.get("process"),
+                part.get("processType"),
+                part.get("process_type"),
+                part.get("material"),
+                part.get("part_name"),
+                part.get("name"),
+            ]
+            processes = part.get("processes")
+            if isinstance(processes, list):
+                values.extend(processes)
+            elif processes:
+                values.append(processes)
+            haystack = " ".join(str(value or "") for value in values).lower()
+            if not any(keyword in haystack for keyword in ("sheet", "sheet metal", "metal sheet", "laser", "laser cutting", "bending", "tabla", "tablă")):
+                continue
+            part_id = str(part.get("part_id") or part.get("id") or "").strip()
+            if part_id:
+                ids.add(part_id.lower())
+                digits = "".join(ch for ch in part_id if ch.isdigit())
+                if digits:
+                    ids.add(digits.lower())
+        return ids
+
+    def _geo_item_matches_sheet_part(item, sheet_ids):
+        if not sheet_ids:
+            return True
+        haystack = " ".join(
+            str(item.get(key) or "")
+            for key in ("part_id", "part_name", "partName", "target_path", "targetPath")
+        ).lower()
+        return any(part_id and part_id in haystack for part_id in sheet_ids)
+
+    def _geo_items(geo_status, job=None):
         if not geo_status:
             return []
+        sheet_ids = _sheet_part_ids(job or {})
         return [
             (index, item)
             for index, item in enumerate(geo_status.get("geo_items") or [])
             if (item.get("target_path") or item.get("targetPath")) and item.get("geo_exists") is True
+            and _geo_item_matches_sheet_part(item, sheet_ids)
         ]
 
     def _geo_view_url(offer_id, item_index):
@@ -128,7 +168,7 @@ def run_iteration():
         geo_line = ""
         geo_url = None
         geo_state_key = "geo:none"
-        geo_ready_items = _geo_items(geo_status)
+        geo_ready_items = _geo_items(geo_status, job)
         if geo_ready_items and offer_id:
             geo_links = []
             for number, (item_index, item) in enumerate(geo_ready_items, start=1):
@@ -275,6 +315,26 @@ def run_iteration():
                 skip_offer_ids=skip_offer_ids,
                 max_offers=config.BACKEND_MAX_OFFERS_PER_RUN,
             )
+            payload_by_offer_id = {str(payload.get("offer_id")): payload for payload in payloads if payload.get("offer_id")}
+            detailed_agent_jobs = []
+            for job in jobs:
+                payload = payload_by_offer_id.get(str(job.get("offer_id")))
+                if not payload:
+                    continue
+                job["parts"] = payload.get("parts") or []
+                job["parts_pricing"] = payload.get("parts_pricing") or []
+                if payload.get("title"):
+                    job["id"] = payload["title"]
+                if payload.get("url"):
+                    job["link"] = payload["url"]
+                detailed_agent_jobs.append(dict(job))
+
+            if detailed_agent_jobs:
+                ok, agent_info = agent_client.submit_jobs(detailed_agent_jobs, source="scraper-details")
+                if ok:
+                    logger.info(f"Submitted detailed jobs to XometryAnaliza agents: {agent_info}")
+                else:
+                    logger.error(f"Failed to submit detailed jobs to XometryAnaliza agents: {agent_info}")
             logger.info(
                 f"Backend payloads ready: {len(payloads)} "
                 f"(skip existing: {len(existing_offer_ids)}, synced: {len(synced_offer_ids)}, "
