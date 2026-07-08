@@ -1,4 +1,4 @@
-// Xometry Price Calculator Extension (v2.44)
+// Xometry Price Calculator Extension (v2.61)
 // Content Script v20 - Thickness Normalization
 
 (function () {
@@ -14,7 +14,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.60 Loaded (content_v20.js)");
+    log("Extension v2.61 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -60,7 +60,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.60</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.61</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -131,7 +131,6 @@
         for (const card of cards) { await processCard(card); }
         recalculateTotals();
         injectDownloadOverlayRibbon();
-        injectWalkthrough();
         checkHistoryAndInject();
         injectRulesButton();
     }
@@ -1491,62 +1490,6 @@
         style.type = 'text/css';
         style.innerHTML = `@keyframes spin { 100% { -webkit-transform: rotate(360deg); transform:rotate(360deg); } }`;
         document.head.appendChild(style);
-    }
-
-    // --- Walkthrough ---
-    function injectWalkthrough() {
-        if (localStorage.getItem('xom_walkthrough_seen_2_51')) return;
-
-        // Container
-        const div = document.createElement('div');
-        Object.assign(div.style, {
-            position: 'fixed', bottom: '20px', right: '20px', width: '300px',
-            backgroundColor: 'white', padding: '15px', borderRadius: '8px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 10001,
-            borderLeft: '5px solid #1890ff', fontFamily: 'Arial, sans-serif'
-        });
-
-        const h3 = document.createElement('h3');
-        h3.innerText = 'Extensions Updated! (v2.55)';
-        Object.assign(h3.style, { margin: '0 0 10px 0', color: '#1890ff' });
-
-        const ul = document.createElement('ul');
-        ul.innerHTML = `
-             <li><b>📜 Rules:</b> New "Rules" button for guidelines!</li>
-             <li><b>🕒 History:</b> Auto-check for similar previous jobs.</li>
-             <li><b>⬇ RFQ:</b> Support for "All Drawings.zip".</li>
-             <li><b>📏 Smart Dims:</b> Inputs persist across reloads!</li>
-        `;
-        Object.assign(ul.style, { margin: '0 0 10px 20px', padding: '0', fontSize: '13px', color: '#333' });
-
-        const btnContainer = document.createElement('div');
-        btnContainer.style.textAlign = 'right';
-
-        const btn = document.createElement('button');
-        btn.innerText = 'Got it!';
-        Object.assign(btn.style, {
-            background: '#1890ff', color: 'white', border: 'none',
-            padding: '5px 10px', borderRadius: '4px', cursor: 'pointer'
-        });
-
-        // Robust Listener
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            try {
-                div.remove();
-                localStorage.setItem('xom_walkthrough_seen_2_51', 'true');
-            } catch (err) {
-                console.error(err);
-                div.style.display = 'none'; // Fallback
-            }
-        };
-
-        btnContainer.appendChild(btn);
-        div.appendChild(h3);
-        div.appendChild(ul);
-        div.appendChild(btnContainer);
-
-        document.body.appendChild(div);
     }
 
     // --- Job History & Rules ---
