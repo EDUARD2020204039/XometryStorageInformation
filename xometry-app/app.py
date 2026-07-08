@@ -35,6 +35,7 @@ from xometry.image_utils import download_and_save_image, cleanup_old_images
 
 # Încarcă variabilele de mediu
 load_dotenv()
+load_dotenv("/app/data/.env", override=True)
 
 _request_id_ctx: ContextVar[str] = ContextVar("request_id", default="-")
 
@@ -310,6 +311,91 @@ def _normalize_offer_title(
         return cleaned
 
     return str(offer_external_id or "")
+
+
+def _job_tokens(value: Optional[str]) -> list[str]:
+    text = (value or "").upper()
+    tokens = []
+    for pattern in (r"\bHJO-\d+(?:-\d+)?\b", r"\bJ-\d+(?:-\d+)?\b", r"\bRFQ-\d+(?:-\d+)?\b"):
+        tokens.extend(match.group(0) for match in re.finditer(pattern, text))
+    roots = []
+    for token in tokens:
+        parts = token.split("-")
+        if len(parts) >= 2:
+            roots.append("-".join(parts[:2]))
+    return list(dict.fromkeys([*tokens, *roots]))
+
+
+def _part_ids_from_raw(raw: Optional[str]) -> list[str]:
+    if not raw:
+        return []
+    values = []
+    for item in raw.split(","):
+        item = item.strip()
+        if item:
+            values.append(item)
+    return list(dict.fromkeys(values))
+
+
+def _offer_public_url(offer: Offer) -> str:
+    return f"/offer/{offer.id}"
+
+
+def _offer_dosar_payload(offer: Offer, reason: str = "") -> dict:
+    return {
+        "id": offer.id,
+        "offer_id": offer.offer_id,
+        "title": _normalize_offer_title(offer.title, offer.offer_id, offer.url),
+        "url": offer.url,
+        "backend_url": _offer_public_url(offer),
+        "dosar_id": offer.dosar_id,
+        "dosar_path": offer.dosar_path,
+        "dosar_allocated": offer.dosar_allocated.isoformat() if offer.dosar_allocated else None,
+        "has_dosar": bool(offer.dosar_id),
+        "reason": reason,
+    }
+
+
+def _find_offer_by_external_id(db: Session, external_offer_id: str) -> Offer | None:
+    offer = db.query(Offer).filter(Offer.offer_id == str(external_offer_id)).first()
+    if offer:
+        return offer
+    if str(external_offer_id).isdigit():
+        return db.query(Offer).filter(Offer.id == int(external_offer_id)).first()
+    return None
+
+
+def _find_dosar_references(
+    db: Session,
+    current_offer: Offer | None,
+    external_offer_id: str,
+    job_id: Optional[str],
+    part_ids: list[str],
+) -> list[dict]:
+    current_internal_id = current_offer.id if current_offer else None
+    references: dict[int, dict] = {}
+    tokens = _job_tokens(job_id)
+
+    for offer in db.query(Offer).order_by(Offer.created_at.desc()).limit(1000).all():
+        if current_internal_id and offer.id == current_internal_id:
+            continue
+        haystack = " ".join([
+            str(offer.offer_id or ""),
+            str(offer.title or ""),
+            str(offer.url or ""),
+        ]).upper()
+        if any(token and token in haystack for token in tokens):
+            references[offer.id] = _offer_dosar_payload(offer, "job")
+
+    for part_id in part_ids:
+        query = db.query(Part).filter(Part.part_id == part_id)
+        for part in query.all():
+            offer = db.query(Offer).filter(Offer.id == part.offer_id).first()
+            if not offer or (current_internal_id and offer.id == current_internal_id):
+                continue
+            references[offer.id] = _offer_dosar_payload(offer, f"part:{part_id}")
+
+    return list(references.values())
 
 def _find_deviz_template() -> Optional[Path]:
     root = Path(__file__).resolve().parent
@@ -864,7 +950,11 @@ async def get_offers(db: Session = Depends(get_db)):
             'customer': offer.customer,
             'url': offer.url,
             'created_at': offer.created_at.isoformat(),
-            'parts_count': len(offer.parts)
+            'parts_count': len(offer.parts),
+            'dosar_id': offer.dosar_id,
+            'dosar_path': offer.dosar_path,
+            'dosar_allocated': offer.dosar_allocated.isoformat() if offer.dosar_allocated else None,
+            'has_dosar': bool(offer.dosar_id),
         } for offer in offers]
     except Exception as e:
         logger.error(f"Eroare la obținerea ofertelor: {e}")
@@ -878,7 +968,7 @@ async def get_offer_parts(offer_id: int, db: Session = Depends(get_db)):
         return [{
             'id': part.id,
             'part_id': part.part_id,
-            'part_name': part.part_name,
+            'part_name': part.name,
             'material': part.material,
             'remarks': part.remarks,
             'weight': part.weight,
@@ -894,6 +984,133 @@ async def get_offer_parts(offer_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Eroare la obținerea reperelor: {e}")
         raise HTTPException(status_code=500, detail="Eroare internă")
+
+@app.get("/api/xometry/dosar/{external_offer_id}")
+async def get_xometry_dosar_status(
+    external_offer_id: str,
+    job_id: Optional[str] = None,
+    part_ids: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Status dosar pentru extensie: oferta curenta si referinte dupa HJO/J/RFQ sau Part ID."""
+    try:
+        offer = _find_offer_by_external_id(db, external_offer_id)
+        parsed_part_ids = _part_ids_from_raw(part_ids)
+        references = _find_dosar_references(db, offer, external_offer_id, job_id, parsed_part_ids)
+        references_with_dosar = [item for item in references if item.get("has_dosar")]
+
+        return {
+            "success": True,
+            "offer_id": external_offer_id,
+            "job_id": job_id,
+            "part_ids": parsed_part_ids,
+            "offer_found": bool(offer),
+            "current": _offer_dosar_payload(offer, "current") if offer else None,
+            "has_dosar": bool(offer and offer.dosar_id),
+            "references": references[:10],
+            "references_with_dosar": references_with_dosar[:10],
+        }
+    except Exception as e:
+        logger.error("Could not get Xometry dosar status: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/xometry/dosar/{external_offer_id}/create")
+async def create_xometry_dosar(
+    external_offer_id: str,
+    payload: dict = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+):
+    """Creeaza/aloca dosar pentru oferta Xometry curenta."""
+    try:
+        offer = _find_offer_by_external_id(db, external_offer_id)
+        if not offer:
+            title = payload.get("job_name") or payload.get("title") or f"Xometry {external_offer_id}"
+            url = payload.get("url") or f"https://partner.xometry.eu/offers/{external_offer_id}"
+            offer = Offer(
+                offer_id=str(external_offer_id),
+                title=title,
+                customer="Xometry",
+                url=url,
+            )
+            db.add(offer)
+            db.flush()
+
+            for part_data in payload.get("parts") or []:
+                part_id = str(part_data.get("part_id") or "").strip()
+                if not part_id:
+                    continue
+                dims = part_data.get("dimensions") or {}
+                db.add(Part(
+                    offer_id=offer.id,
+                    part_id=part_id,
+                    name=part_data.get("part_name") or f"Part {part_id}",
+                    material=part_data.get("material") or "",
+                    quantity=part_data.get("quantity") or 1,
+                    length=dims.get("l"),
+                    width=dims.get("w"),
+                    height=dims.get("h"),
+                    processes=part_data.get("process"),
+                ))
+
+        if offer.dosar_id:
+            return {
+                "success": True,
+                "message": "Oferta are deja dosar",
+                "current": _offer_dosar_payload(offer, "current"),
+            }
+
+        from xometry.dosar_service import DosarService
+
+        metadata = {
+            "offer_id": str(external_offer_id),
+            "job_id": payload.get("job_name") or payload.get("title"),
+            "part_ids": [str(item.get("part_id")) for item in payload.get("parts") or [] if item.get("part_id")],
+            "url": payload.get("url") or offer.url,
+        }
+        result = DosarService().allocate_dosar(offer.offer_id, offer.title, metadata=metadata)
+        if not result.get("success"):
+            raise HTTPException(status_code=502, detail=result.get("error") or "Nu s-a putut crea dosarul")
+
+        offer.dosar_id = result["dosar_id"]
+        offer.dosar_path = result.get("path_linux") or result.get("path_windows")
+        offer.dosar_allocated = datetime.utcnow()
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "Dosar creat",
+            "current": _offer_dosar_payload(offer, "current"),
+            "dosar": result,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error("Could not create Xometry dosar: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/odoo/dosar/discover")
+async def discover_odoo_dosar_action():
+    """Incarca action-ul Odoo configurat, util dupa ce pui credentialele in .env."""
+    try:
+        from xometry.odoo_client import OdooClient
+
+        action = OdooClient().load_dosar_action()
+        return {
+            "success": True,
+            "action_id": action.get("id"),
+            "name": action.get("name"),
+            "res_model": action.get("res_model"),
+            "views": action.get("views"),
+            "context": action.get("context"),
+        }
+    except Exception as e:
+        logger.error("Could not discover Odoo dosar action: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/offer/{offer_id}/remarks")
 async def update_offer_remarks(offer_id: int, request: Request, db: Session = Depends(get_db)):

@@ -162,6 +162,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    if (request.action === "GET_DOSAR_STATUS") {
+        getDosarStatus(request.offerData || {})
+            .then(result => sendResponse(result))
+            .catch(e => sendResponse({ success: false, error: String(e) }));
+        return true;
+    }
+
+    if (request.action === "CREATE_DOSAR") {
+        createDosar(request.offerData || {})
+            .then(result => sendResponse(result))
+            .catch(e => sendResponse({ success: false, error: String(e) }));
+        return true;
+    }
+
     if (request.action === 'TRIGGER_ANALYSIS') {
         triggerAnalysis(request.partId)
             .then(res => sendResponse(res))
@@ -204,8 +218,8 @@ async function logToLocalServer(message) {
 }
 
 async function checkJobHistory(jobIdString, excludeOfferId) {
-    // jobIdString ex: "J-1758532-314117" -> root: "J-1758532"
-    const rootMatch = jobIdString.match(/(J-\d+)/);
+    // jobIdString ex: "HJO-33079-1972" -> root: "HJO-33079"
+    const rootMatch = jobIdString.match(/(HJO-\d+|J-\d+|RFQ-\d+)/);
     const rootId = rootMatch ? rootMatch[1] : jobIdString;
 
     logToLocalServer(`Checking History for Root: ${rootId}, Excluding: ${excludeOfferId}`);
@@ -303,6 +317,55 @@ async function getAgentGeo(offerId) {
         }
     }
     return { success: false, error: lastError };
+}
+
+function partIdsForDosar(offerData) {
+    return (offerData.parts || [])
+        .map(part => part && part.part_id)
+        .filter(Boolean)
+        .join(",");
+}
+
+async function getDosarStatus(offerData) {
+    const offerId = offerData.offer_id;
+    if (!offerId || offerId === "unknown") return { success: false, error: "Missing offer_id" };
+
+    const url = new URL(`${BACKEND_URL}/api/xometry/dosar/${encodeURIComponent(offerId)}`);
+    if (offerData.job_name || offerData.title) url.searchParams.set("job_id", offerData.job_name || offerData.title);
+    const partIds = partIdsForDosar(offerData);
+    if (partIds) url.searchParams.set("part_ids", partIds);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    try {
+        const resp = await fetch(url.toString(), { method: "GET", signal: controller.signal });
+        const data = await resp.json();
+        if (!resp.ok) return { success: false, error: data.detail || `HTTP ${resp.status}` };
+        return { success: true, data, source: BACKEND_URL };
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+async function createDosar(offerData) {
+    const offerId = offerData.offer_id;
+    if (!offerId || offerId === "unknown") return { success: false, error: "Missing offer_id" };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+        const resp = await fetch(`${BACKEND_URL}/api/xometry/dosar/${encodeURIComponent(offerId)}/create`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(offerData),
+            signal: controller.signal
+        });
+        const data = await resp.json();
+        if (!resp.ok) return { success: false, error: data.detail || `HTTP ${resp.status}`, data };
+        return { success: true, data, source: BACKEND_URL };
+    } finally {
+        clearTimeout(timeoutId);
+    }
 }
 
 async function postToBackend(payload) {

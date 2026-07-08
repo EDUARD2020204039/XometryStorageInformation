@@ -6,6 +6,7 @@
     let latestAgentGeoSource = null;
     let latestAgentGeoToastKey = null;
     let latestAgentGeoToastTimer = null;
+    let latestDosarStatusKey = null;
 
     function log(msg) {
         // Log to browser console so user can see it
@@ -13,7 +14,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.59 Loaded (content_v20.js)");
+    log("Extension v2.60 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -59,7 +60,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.59</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.60</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -602,6 +603,16 @@
         return headings.find(heading => /\bJob\s+(HJO-|J-|RFQ-)/i.test(heading.textContent || '')) || headings[0] || null;
     }
 
+    function titleActionContainer(title) {
+        let container = document.getElementById('xom-title-actions');
+        if (!container) {
+            container = document.createElement('span');
+            container.id = 'xom-title-actions';
+            title.appendChild(container);
+        }
+        return container;
+    }
+
     function injectAllGeoTitleButton(geoStatus, agentSource, offerId) {
         const readyCount = readyGeoEntries(geoStatus?.geo_items || []).length;
         let button = document.getElementById('xom-all-geo-title-btn');
@@ -619,11 +630,84 @@
             button.target = '_blank';
             button.rel = 'noreferrer';
             button.textContent = readyCount === 1 ? 'Desfasurata GEO' : `Desfasurate GEO (${readyCount})`;
-            title.insertAdjacentElement('afterend', button);
+            titleActionContainer(title).appendChild(button);
         }
 
         button.href = geoAllViewUrl(agentSource, offerId);
         button.textContent = readyCount === 1 ? 'Desfasurata GEO' : `Desfasurate GEO (${readyCount})`;
+    }
+
+    function backendOfferUrl(source, backendUrl) {
+        if (!backendUrl) return '#';
+        if (/^https?:\/\//i.test(backendUrl)) return backendUrl;
+        return `${String(source || 'http://86.123.232.23:10000').replace(/\/$/, '')}${backendUrl}`;
+    }
+
+    function injectDosarTitleControls(status, source) {
+        const title = findJobTitleElement();
+        if (!title || !status) return;
+
+        const container = titleActionContainer(title);
+        let button = document.getElementById('xom-dosar-create-btn');
+        if (!button) {
+            button = document.createElement('button');
+            button.id = 'xom-dosar-create-btn';
+            button.type = 'button';
+            button.onclick = () => createDosarFromTitle();
+            container.appendChild(button);
+        }
+
+        const current = status.current || null;
+        if (status.has_dosar && current?.dosar_id) {
+            button.textContent = `Dosar ${current.dosar_id}`;
+            button.title = current.dosar_path || 'Dosar creat';
+            button.disabled = true;
+            button.classList.add('xom-dosar-created');
+        } else {
+            button.textContent = 'Creeaza dosar';
+            button.title = 'Creeaza dosar pentru oferta curenta';
+            button.disabled = false;
+            button.classList.remove('xom-dosar-created');
+        }
+
+        let ref = document.getElementById('xom-dosar-reference');
+        const reference = (status.references_with_dosar || [])[0];
+        if (reference && reference.dosar_id) {
+            if (!ref) {
+                ref = document.createElement('a');
+                ref.id = 'xom-dosar-reference';
+                ref.target = '_blank';
+                ref.rel = 'noreferrer';
+                container.appendChild(ref);
+            }
+            ref.href = backendOfferUrl(source, reference.backend_url);
+            ref.textContent = `Ref dosar ${reference.dosar_id}`;
+            ref.title = `${reference.title || reference.offer_id || ''}\n${reference.dosar_path || ''}`;
+        } else if (ref) {
+            ref.remove();
+        }
+    }
+
+    function createDosarFromTitle() {
+        const offerData = buildOffer();
+        const button = document.getElementById('xom-dosar-create-btn');
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Creez dosar...';
+        }
+        chrome.runtime.sendMessage({ action: 'CREATE_DOSAR', offerData }, (res) => {
+            if (chrome.runtime.lastError || !res || !res.success) {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = 'Eroare dosar';
+                    button.title = chrome.runtime.lastError?.message || res?.error || 'Eroare';
+                }
+                BackendUI.setStatus('Dosar error', 'error', chrome.runtime.lastError?.message || res?.error || '');
+                return;
+            }
+            BackendUI.setStatus('Dosar creat', 'success', res.data?.current?.dosar_id || '');
+            refreshDosarStatus(true);
+        });
     }
 
     function partNameFromCard(card) {
@@ -1143,20 +1227,38 @@
         } catch (e) { }
     }
 
+    function refreshDosarStatus(force = false) {
+        try {
+            const data = buildOffer();
+            if (!data || !data.offer_id || data.offer_id === "unknown") return;
+            const key = [
+                data.offer_id,
+                data.job_name || '',
+                (data.parts || []).map(part => part.part_id).join(',')
+            ].join('::');
+            if (!force && key === latestDosarStatusKey) return;
+            chrome.runtime.sendMessage({ action: "GET_DOSAR_STATUS", offerData: data }, (response) => {
+                if (chrome.runtime.lastError || !response || !response.success) return;
+                latestDosarStatusKey = key;
+                injectDosarTitleControls(response.data, response.source);
+            });
+        } catch (e) { }
+    }
+
     function buildOffer() {
         const offerId = window.location.href.match(/\/offers\/(\d+)/)?.[1] || "unknown";
 
         let jobId = null;
         const h1 = document.querySelector('h1');
         if (h1) {
-            const match = h1.textContent.match(/(RFQ-[\d-]+|J-[\d-]+)/);
+            const match = h1.textContent.match(/(RFQ-[\d-]+|HJO-[\d-]+|J-[\d-]+)/);
             if (match) jobId = match[1];
         }
         // Fallback for Job ID
         if (!jobId) {
             const titleEl = document.querySelector('._title_1a29i_1');
             if (titleEl) {
-                const match = titleEl.textContent.match(/(RFQ-[\d-]+|J-[\d-]+)/);
+                const match = titleEl.textContent.match(/(RFQ-[\d-]+|HJO-[\d-]+|J-[\d-]+)/);
                 if (match) jobId = match[1];
             }
         }
@@ -1252,6 +1354,7 @@
 
     setInterval(() => BackendUI.ensureButton(), 2000);
     setInterval(() => refreshAgentGeo(), 5000);
+    setInterval(() => refreshDosarStatus(), 7000);
 
     // --- Download Features ---
     function injectDownloadOverlayRibbon() {
@@ -1323,7 +1426,7 @@
                 if (h1) {
                     const text = h1.textContent;
                     // Match: "Job J-123", "J-123", "RFQ-123-456", "RFQ-123"
-                    const match = text.match(/(RFQ-[\d-]+|J-[\d-]+)/);
+                    const match = text.match(/(RFQ-[\d-]+|HJO-[\d-]+|J-[\d-]+)/);
                     if (match) currentJobId = match[1];
                 }
 
@@ -1331,7 +1434,7 @@
                 if (currentJobId === "Unknown") {
                     const titleEl = document.querySelector('._title_1a29i_1'); // Class from user snippet
                     if (titleEl) {
-                        const match = titleEl.textContent.match(/(RFQ-[\d-]+|J-[\d-]+)/);
+                        const match = titleEl.textContent.match(/(RFQ-[\d-]+|HJO-[\d-]+|J-[\d-]+)/);
                         if (match) currentJobId = match[1];
                     }
                 }
@@ -1456,7 +1559,7 @@
 
         // Strategy 1: H1
         if (h1) {
-            const match = h1.textContent.match(/(RFQ-[\d-]+|J-[\d-]+)/);
+            const match = h1.textContent.match(/(RFQ-[\d-]+|HJO-[\d-]+|J-[\d-]+)/);
             if (match) jobId = match[1];
         }
 
@@ -1464,7 +1567,7 @@
         if (!jobId) {
             const titleEl = document.querySelector('._title_1a29i_1');
             if (titleEl) {
-                const match = titleEl.textContent.match(/(RFQ-[\d-]+|J-[\d-]+)/);
+                const match = titleEl.textContent.match(/(RFQ-[\d-]+|HJO-[\d-]+|J-[\d-]+)/);
                 if (match) jobId = match[1];
                 if (!h1) h1 = titleEl; // Use this as anchor if H1 missing
             }

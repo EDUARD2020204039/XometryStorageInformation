@@ -7,6 +7,7 @@ from . import settings
 from .ofertare_client import extract_geo_items, run_ofertare_automata
 from .store import append_event, load_job_state, save_job_state
 from .telegram_log import send_log
+from .xometry_backend_client import lookup_dosar_references
 
 
 def _text(job: dict[str, Any]) -> str:
@@ -156,6 +157,21 @@ def process_job(job: dict[str, Any]) -> dict[str, Any]:
     state["agents"] = agents
 
     append_event("router.route", f"Router selected {agents or ['none']} for {job_id}", job_id=job_id, offer_id=job.get("offer_id"), agents=agents)
+
+    try:
+        dosar_lookup = lookup_dosar_references(job)
+        state["dosar_lookup"] = dosar_lookup
+        reference_count = len(dosar_lookup.get("references_with_dosar") or [])
+        append_event(
+            "dosar.lookup",
+            f"Dosar lookup found {reference_count} references for {job_id}",
+            job_id=job_id,
+            offer_id=job.get("offer_id"),
+            references_with_dosar=dosar_lookup.get("references_with_dosar") or [],
+        )
+    except Exception as exc:
+        state["dosar_lookup"] = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+        append_event("dosar.lookup_failed", f"Dosar lookup failed for {job_id}: {exc}", job_id=job_id, offer_id=job.get("offer_id"))
 
     results = {}
     if "cnc" in agents:
