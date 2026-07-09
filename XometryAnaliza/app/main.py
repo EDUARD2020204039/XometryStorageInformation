@@ -53,6 +53,127 @@ def jobs(limit: int = 100) -> dict[str, Any]:
     return {"items": list_jobs(limit)}
 
 
+def _history_items(limit: int = 300) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for state in list_jobs(limit):
+        sheet = state.get("sheet_metal_laser") or {}
+        if not sheet:
+            continue
+        job = state.get("job") or {}
+        result = sheet.get("ofertare_result") or {}
+        geo_items = sheet.get("geo_items") or []
+        project_root = str(result.get("projectRoot") or result.get("project_root") or "")
+        project_name = str(result.get("projectName") or project_root.replace("\\", "/").rstrip("/").split("/")[-1] or "")
+        offer_id = str(state.get("offer_id") or job.get("offer_id") or "")
+        job_id = str(state.get("job_id") or job.get("id") or offer_id or "")
+        items.append(
+            {
+                "job_id": job_id,
+                "offer_id": offer_id,
+                "title": job.get("title") or job.get("job_name") or job_id,
+                "url": job.get("link") or job.get("url") or "",
+                "status": sheet.get("status") or "",
+                "project_root": project_root,
+                "project_name": project_name,
+                "geo_count": len([item for item in geo_items if item.get("target_path")]),
+                "ready_geo_count": len([item for item in geo_items if item.get("geo_exists") is True]),
+                "updated_ts": state.get("updated_ts") or sheet.get("completed_ts") or sheet.get("started_ts") or 0,
+                "started_ts": sheet.get("started_ts") or 0,
+                "completed_ts": sheet.get("completed_ts") or 0,
+                "error": sheet.get("error") or "",
+            }
+        )
+    return sorted(items, key=lambda item: float(item.get("updated_ts") or 0), reverse=True)
+
+
+@app.get("/api/agents/history")
+def agent_history(limit: int = 300) -> dict[str, Any]:
+    return {"items": _history_items(limit)}
+
+
+@app.get("/api/agents/history/view", response_class=HTMLResponse)
+def agent_history_view(limit: int = 300) -> HTMLResponse:
+    rows = []
+    for item in _history_items(limit):
+        offer_id = str(item.get("offer_id") or "")
+        job_id = str(item.get("job_id") or "")
+        xometry_url = str(item.get("url") or "")
+        if not xometry_url and offer_id:
+            xometry_url = f"https://partner.xometry.eu/offers/{quote(offer_id, safe='')}?gsh=true&source=jobs&locale=en"
+        project_name = str(item.get("project_name") or "")
+        project_root = str(item.get("project_root") or "")
+        status = str(item.get("status") or "")
+        error = str(item.get("error") or "")
+        geo_count = int(item.get("geo_count") or 0)
+        ready_geo_count = int(item.get("ready_geo_count") or 0)
+        completed_ts = float(item.get("completed_ts") or item.get("updated_ts") or 0)
+        xometry_link = (
+            f'<a href="{html.escape(xometry_url, quote=True)}" target="_blank" rel="noreferrer">{html.escape(job_id)}</a>'
+            if xometry_url
+            else html.escape(job_id)
+        )
+        dosar_link = (
+            f'<a class="button green" href="/api/agents/project/{quote(offer_id, safe="")}" target="_blank" rel="noreferrer">{html.escape(project_name or "Dosar")}</a>'
+            if offer_id and project_root
+            else '<span class="muted">-</span>'
+        )
+        geo_link = (
+            f'<a class="button" href="/api/agents/geo/{quote(offer_id, safe="")}/view" target="_blank" rel="noreferrer">GEO {geo_count}</a>'
+            if offer_id and geo_count
+            else '<span class="muted">-</span>'
+        )
+        rows.append(
+            f"<tr>"
+            f"<td><strong>{xometry_link}</strong><div class=\"muted\">{html.escape(offer_id)}</div></td>"
+            f"<td><span class=\"status {html.escape(status)}\">{html.escape(status or '-')}</span></td>"
+            f"<td>{dosar_link}<div class=\"muted path\">{html.escape(project_root)}</div></td>"
+            f"<td>{geo_link}<div class=\"muted\">gata: {ready_geo_count}</div></td>"
+            f"<td data-ts=\"{completed_ts}\"></td>"
+            f"<td class=\"err\">{html.escape(error)}</td>"
+            f"</tr>"
+        )
+    table_rows = "".join(rows) or '<tr><td colspan="6">Nu exista istoric inca.</td></tr>'
+    return HTMLResponse(f"""<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Istoric XometryAnaliza</title>
+  <style>
+    body{{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}}
+    header{{padding:22px 26px;background:#111827;color:white}}
+    h1{{margin:0;font-size:24px}} .sub{{margin-top:6px;color:#cbd5e1}}
+    main{{padding:18px 22px}}
+    table{{width:100%;border-collapse:collapse;background:white;border:1px solid #d9e2ec;border-radius:8px;overflow:hidden}}
+    th,td{{padding:10px 12px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top;font-size:14px}}
+    th{{background:#f8fafc;font-size:12px;text-transform:uppercase;color:#52606d}}
+    a{{color:#0958d9;text-decoration:none;font-weight:700}} a:hover{{text-decoration:underline}}
+    .button{{display:inline-flex;align-items:center;min-height:28px;padding:0 9px;border:1px solid #1677ff;border-radius:4px;background:white;color:#0958d9;text-decoration:none;font-weight:700}}
+    .green{{border-color:#16a34a;background:#ecfdf3;color:#166534}}
+    .muted{{margin-top:4px;color:#64748b;font-size:12px}} .path{{max-width:520px;word-break:break-all}}
+    .status{{display:inline-flex;min-height:22px;align-items:center;border-radius:999px;padding:0 8px;background:#e2e8f0;color:#334155;font-size:12px;font-weight:700}}
+    .geo_ready,.cached{{background:#dcfce7;color:#166534}} .running{{background:#dbeafe;color:#1d4ed8}} .failed{{background:#fee2e2;color:#991b1b}} .geo_requested{{background:#fef3c7;color:#92400e}}
+    .err{{max-width:360px;color:#991b1b;font-size:12px;word-break:break-word}}
+  </style>
+</head>
+<body>
+  <header><h1>Istoric XometryAnaliza</h1><div class="sub">Oferte procesate de agentul sheet/laser</div></header>
+  <main>
+    <table>
+      <thead><tr><th>Oferta</th><th>Status</th><th>Dosar</th><th>GEO</th><th>Finalizat</th><th>Eroare</th></tr></thead>
+      <tbody>{table_rows}</tbody>
+    </table>
+  </main>
+  <script>
+    document.querySelectorAll('td[data-ts]').forEach(td => {{
+      const ts = Number(td.dataset.ts || 0);
+      td.textContent = ts ? new Date(ts * 1000).toLocaleString() : '-';
+    }});
+  </script>
+</body>
+</html>""")
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     return HTMLResponse("""<!doctype html>
@@ -65,6 +186,8 @@ def dashboard() -> HTMLResponse:
     body{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}
     header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 20px;background:#111827;color:white}
     h1{margin:0;font-size:20px} .sub{color:#cbd5e1;font-size:12px;margin-top:3px}
+    .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+    .toplink{display:inline-flex;align-items:center;height:30px;padding:0 10px;border-radius:999px;background:white;color:#0958d9;text-decoration:none;font-size:12px;font-weight:700}
     main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px}
     section{background:white;border:1px solid #d9e2ec;border-radius:8px;overflow:hidden}
     h2{margin:0;padding:12px 14px;border-bottom:1px solid #e5eaf0;font-size:15px;background:#f8fafc}
@@ -80,7 +203,7 @@ def dashboard() -> HTMLResponse:
   </style>
 </head>
 <body>
-  <header><div><h1>XometryAnaliza</h1><div class="sub">TecZone laptop queue, GEO, bend status</div></div><div id="summary"></div></header>
+  <header><div><h1>XometryAnaliza</h1><div class="sub">TecZone laptop queue, GEO, bend status</div></div><div class="top"><a class="toplink" href="/api/agents/history/view" target="_blank" rel="noreferrer">Istoric</a><div id="summary"></div></div></header>
   <main>
     <div>
       <section id="active"></section>
@@ -100,7 +223,7 @@ def dashboard() -> HTMLResponse:
     }
     function projectButton(item){
       if (!item?.offer_id) return '';
-      if (!item?.project_root) return `<div style="margin-top:10px"><a class="button" href="http://192.168.2.26:8585" target="_blank" rel="noreferrer">Deschide Ofertare Dorina</a></div>`;
+      if (!item?.project_root) return `<div style="margin-top:10px"><a class="button" href="http://192.168.2.26:8585" target="_blank" rel="noreferrer">Deschide Ofertare</a></div>`;
       return `<div style="margin-top:10px"><a class="button" href="/api/agents/project/${encodeURIComponent(item.offer_id)}" target="_blank" rel="noreferrer">Dosar activ: ${esc(item.project_name || item.project_root)}</a></div>`;
     }
     async function move(id, direction){ await api('/api/queue/'+encodeURIComponent(id)+'/move',{method:'POST',body:JSON.stringify({direction})}); refresh(); }
