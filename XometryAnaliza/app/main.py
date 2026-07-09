@@ -118,16 +118,17 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
             else '<span class="muted">-</span>'
         )
         geo_link = (
-            f'<a class="button" href="/api/agents/geo/{quote(offer_id, safe="")}/view" target="_blank" rel="noreferrer">GEO {geo_count}</a>'
-            if offer_id and geo_count
+            f'<a class="button" href="/api/agents/geo/{quote(offer_id, safe="")}/view" target="_blank" rel="noreferrer">GEO {ready_geo_count}</a>'
+            if offer_id and ready_geo_count
             else '<span class="muted">-</span>'
         )
+        geo_note = f"cerute: {geo_count} / gata: {ready_geo_count}" if geo_count else f"gata: {ready_geo_count}"
         rows.append(
             f"<tr>"
             f"<td><strong>{xometry_link}</strong><div class=\"muted\">{html.escape(offer_id)}</div></td>"
             f"<td><span class=\"status {html.escape(status)}\">{html.escape(status or '-')}</span></td>"
             f"<td>{dosar_link}<div class=\"muted path\">{html.escape(project_root)}</div></td>"
-            f"<td>{geo_link}<div class=\"muted\">gata: {ready_geo_count}</div></td>"
+            f"<td>{geo_link}<div class=\"muted\">{html.escape(geo_note)}</div></td>"
             f"<td data-ts=\"{completed_ts}\"></td>"
             f"<td class=\"err\">{html.escape(error)}</td>"
             f"</tr>"
@@ -496,7 +497,38 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
     ]
 
     if not ready_indexes:
-        raise HTTPException(status_code=404, detail="No ready GEO files found for this offer.")
+        xometry_link = (
+            f'<a class="button secondary" href="{html.escape(xometry_url, quote=True)}" target="_blank" rel="noreferrer">Deschide oferta Xometry</a>'
+            if xometry_url
+            else ""
+        )
+        requested_count = len([item for item in geo_items if item.get("target_path")])
+        return HTMLResponse(f"""<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desfasurate GEO - {html.escape(job_id)}</title>
+  <style>
+    body{{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}}
+    header{{padding:28px 32px;background:#111827;color:white}}
+    h1{{margin:0;font-size:26px}} .sub{{margin-top:8px;color:#cbd5e1}}
+    main{{padding:24px 32px}}
+    .card{{background:white;border:1px solid #d9e2ec;border-radius:8px;padding:18px;max-width:760px}}
+    .button{{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 14px;border:1px solid #1677ff;border-radius:4px;background:white;color:#0958d9;text-decoration:none;font-weight:700}}
+  </style>
+</head>
+<body>
+  <header><h1>Desfasurate GEO - {html.escape(job_id)}</h1><div class="sub">Oferta {html.escape(str(offer_id))}</div></header>
+  <main>
+    <section class="card">
+      <h2>Nu exista GEO gata pentru afisare</h2>
+      <p>Au fost cerute {requested_count} desfasurate, dar niciun fisier nu este confirmat ca salvat pe disc.</p>
+      {xometry_link}
+    </section>
+  </main>
+</body>
+</html>""", status_code=404)
 
     cards = []
     for display_index, item_index in enumerate(ready_indexes, start=1):
