@@ -95,6 +95,22 @@ def _filter_geo_items_for_sheet_parts(job: dict[str, Any], geo_items: list[dict[
     return filtered
 
 
+def _ofertare_failure_reason(result: dict[str, Any]) -> str:
+    warnings = [str(item or "") for item in result.get("warnings") or []]
+    warning_text = "\n".join(warnings).lower()
+    if "pagina de login" in warning_text or "xometry_email/xometry_password" in warning_text:
+        return "Ofertare a primit pagina de login Xometry; lipsesc credentialele Xometry pentru agent."
+    if "nu am gasit nicio piesa" in warning_text or "nu exista piese/step" in warning_text:
+        return "Ofertare nu a gasit piese/STEP in captura Xometry."
+
+    for item in result.get("trutops") or []:
+        classification = str(item.get("classification") or "").lower()
+        reason = str(item.get("reason") or item.get("message") or "")
+        if classification in {"xometry_parts_missing", "source_missing"}:
+            return reason or "Ofertare nu a gasit piese/STEP pentru TecZone."
+    return ""
+
+
 class RouterAgent:
     def route(self, job: dict[str, Any]) -> list[str]:
         text = _text(job)
@@ -192,19 +208,29 @@ class SheetMetalLaserAgent:
         try:
             result = run_ofertare_automata(job)
             geo_items = _filter_geo_items_for_sheet_parts(job, extract_geo_items(result))
-            bend_report = build_bend_artifacts(job_id, offer_id, result, geo_items) if offer_id else None
+            failure_reason = _ofertare_failure_reason(result)
+            bend_report = build_bend_artifacts(job_id, offer_id, result, geo_items) if offer_id and not failure_reason else None
             agent_busy = bool(geo_items) and all(
                 str(item.get("classification") or "").lower() == "agent_busy"
                 or "agent is already processing" in str(item.get("reason") or "").lower()
                 for item in geo_items
             )
-            status = "agent_busy" if agent_busy else "geo_ready" if any(item.get("geo_exists") for item in geo_items) else "geo_requested"
+            status = (
+                "agent_busy"
+                if agent_busy
+                else "failed"
+                if failure_reason
+                else "geo_ready"
+                if any(item.get("geo_exists") for item in geo_items)
+                else "geo_requested"
+            )
             output = {
                 "agent": self.name,
                 "status": status,
                 "ofertare_result": result,
                 "geo_items": geo_items,
                 "bend_report": bend_report,
+                "error": failure_reason,
                 "matched_sheet_part_ids": sorted(_sheet_part_ids(job)),
                 "completed_ts": time.time(),
             }
