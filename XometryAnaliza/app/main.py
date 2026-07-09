@@ -203,7 +203,12 @@ def bend_artifact(offer_id: str, filename: str) -> Response:
         path = artifact_path(offer_id, filename)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Artifact not found") from exc
-    media_type = "text/html; charset=utf-8" if path.suffix.lower() == ".html" else "application/json"
+    if path.suffix.lower() == ".html":
+        media_type = "text/html; charset=utf-8"
+    elif path.suffix.lower() == ".png":
+        media_type = "image/png"
+    else:
+        media_type = "application/json"
     return Response(path.read_bytes(), media_type=media_type)
 
 

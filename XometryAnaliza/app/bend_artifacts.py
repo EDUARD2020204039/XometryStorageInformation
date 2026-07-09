@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import textwrap
 import time
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,7 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
         cards.append(f"""
         <section class="card issue">
           <h2>{index}. {html.escape(str(item.get('partName') or item.get('part_name') or 'Reper'))}</h2>
-          <div class="meta">status: {html.escape(str(item.get('status')))} · clasificare: {html.escape(str(item.get('classification')))}</div>
+          <div class="meta">status: {html.escape(str(item.get('status')))} &middot; clasificare: {html.escape(str(item.get('classification')))}</div>
           <p>{html.escape(str(item.get('reason') or item.get('message') or 'Problema detectata la indoire.'))}</p>
           <h3>Pasi</h3><ol>{steps or '<li>Nu sunt pasi raportati.</li>'}</ol>
           <h3>Controale TecZone vazute</h3><ul>{control_lines or '<li>Nu sunt controale capturate.</li>'}</ul>
@@ -97,12 +98,13 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
 <body>
   <header>
     <h1>{html.escape(summary['status'])}</h1>
-    <div class="sub">{html.escape(job_id)} · oferta {html.escape(str(offer_id))} · {len(issues)} probleme · {len(warnings)} avertizari</div>
+    <div class="sub">{html.escape(job_id)} &middot; oferta {html.escape(str(offer_id))} &middot; {len(issues)} probleme &middot; {len(warnings)} avertizari</div>
   </header>
   <main>{''.join(cards)}</main>
 </body>
 </html>"""
     (folder / "bend_report.html").write_text(report_html, encoding="utf-8")
+    _write_bend_png(folder / "bend_report.png", summary, issues, warnings)
     summary["artifacts"] = [
         {
             "type": "bend_report",
@@ -114,8 +116,65 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
             "name": "bend_report.json",
             "url": f"/api/agents/bend/{offer_id}/artifacts/bend_report.json",
         },
+        {
+            "type": "bend_screenshot",
+            "name": "bend_report.png",
+            "url": f"/api/agents/bend/{offer_id}/artifacts/bend_report.png",
+        },
     ]
     return summary
+
+
+def _write_bend_png(path: Path, summary: dict[str, Any], issues: list[dict[str, Any]], warnings: list[Any]) -> None:
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception:
+        return
+
+    width, height = 1280, 760
+    image = Image.new("RGB", (width, height), "#f4f7fb")
+    draw = ImageDraw.Draw(image)
+    try:
+        title_font = ImageFont.truetype("arial.ttf", 34)
+        head_font = ImageFont.truetype("arial.ttf", 22)
+        text_font = ImageFont.truetype("arial.ttf", 18)
+        small_font = ImageFont.truetype("arial.ttf", 15)
+    except Exception:
+        title_font = head_font = text_font = small_font = ImageFont.load_default()
+
+    accent = "#ef4444" if summary.get("has_bend_issues") else "#22c55e"
+    draw.rectangle((0, 0, width, 96), fill="#111827")
+    draw.text((28, 24), str(summary.get("status") or "Bend report"), fill="#ffffff", font=title_font)
+    draw.text((28, 64), f"{summary.get('job_id')} | oferta {summary.get('offer_id')}", fill="#cbd5e1", font=small_font)
+
+    draw.rounded_rectangle((28, 126, width - 28, height - 28), radius=12, fill="#ffffff", outline="#d8e0ea", width=2)
+    draw.rectangle((28, 126, 38, height - 28), fill=accent)
+    y = 154
+    draw.text((58, y), f"Probleme: {len(issues)}    Avertizari: {len(warnings)}", fill="#172033", font=head_font)
+    y += 44
+
+    lines: list[str] = []
+    if issues:
+        for index, issue in enumerate(issues[:8], start=1):
+            name = issue.get("partName") or issue.get("part_name") or "Reper"
+            reason = issue.get("reason") or issue.get("message") or "Problema detectata la indoire."
+            lines.append(f"{index}. {name}: {reason}")
+    else:
+        lines.append("Agentul nu a raportat probleme de indoire pentru fisierele procesate.")
+    if warnings:
+        lines.append("")
+        lines.append("Avertizari:")
+        lines.extend(str(item) for item in warnings[:6])
+
+    for raw in lines:
+        for line in textwrap.wrap(str(raw), width=118) or [""]:
+            draw.text((58, y), line, fill="#334155", font=text_font)
+            y += 28
+            if y > height - 70:
+                draw.text((58, y), "...", fill="#334155", font=text_font)
+                image.save(path)
+                return
+    image.save(path)
 
 
 def read_bend_summary(offer_id: str) -> dict[str, Any] | None:
@@ -143,7 +202,7 @@ def copy_bend_artifacts_to_dosar(offer_id: str, dosar_path: str) -> dict[str, An
     target = target_root / "INDOIRE"
     target.mkdir(parents=True, exist_ok=True)
     copied: list[str] = []
-    for name in ("bend_report.html", "bend_report.json"):
+    for name in ("bend_report.html", "bend_report.json", "bend_report.png"):
         src = _artifact_dir(offer_id) / name
         if not src.exists():
             continue
