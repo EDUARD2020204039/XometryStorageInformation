@@ -227,11 +227,11 @@ def dashboard() -> HTMLResponse:
       return `<div style="margin-top:10px"><a class="button" href="/api/agents/project/${encodeURIComponent(item.offer_id)}" target="_blank" rel="noreferrer">Dosar activ: ${esc(item.project_name || item.project_root)}</a></div>`;
     }
     async function move(id, direction){ await api('/api/queue/'+encodeURIComponent(id)+'/move',{method:'POST',body:JSON.stringify({direction})}); refresh(); }
-    async function priority(id, el){ await api('/api/queue/'+encodeURIComponent(id)+'/priority',{method:'POST',body:JSON.stringify({priority:Number(el.value||100)})}); refresh(); }
+    async function position(id, el){ await api('/api/queue/'+encodeURIComponent(id)+'/priority',{method:'POST',body:JSON.stringify({priority:Number(el.value||1)})}); refresh(); }
     function jobHtml(item, i){
       const title = esc(item.title || item.job_id);
       const id = esc(item.job_id);
-      return `<div class="job"><div><div class="id">${jobName(item, `${i+1}. `)}</div><div class="meta">${title}</div><div class="meta">${esc(item.offer_id||'')} ${esc(item.source||'')}</div></div><div class="actions"><input value="${esc(item.priority||0)}" onchange="priority('${id}',this)"><button onclick="move('${id}','up')">Up</button><button onclick="move('${id}','down')">Down</button></div></div>`;
+      return `<div class="job"><div><div class="id">${jobName(item, `${i+1}. `)}</div><div class="meta">${title}</div><div class="meta">${esc(item.offer_id||'')} ${esc(item.source||'')}</div></div><div class="actions"><input type="number" min="1" value="${i+1}" onchange="position('${id}',this)"><button onclick="move('${id}','up')">Up</button><button onclick="move('${id}','down')">Down</button></div></div>`;
     }
     async function refresh(){
       const data = await api('/api/queue');
@@ -324,7 +324,7 @@ def mcp_tools(x_mcp_token: str | None = Header(default=None)) -> dict[str, Any]:
         "endpoint": "/mcp",
         "methods": {
             "queue.status": {},
-            "queue.set_priority": {"job_id": "HJO-...", "priority": 500},
+            "queue.set_priority": {"job_id": "HJO-...", "priority": 2},
             "queue.move": {"job_id": "HJO-...", "direction": "up|down"},
             "queue.reorder": {"job_ids": ["HJO-1", "HJO-2"]},
             "queue.submit": {"source": "hermes", "jobs": []},

@@ -149,7 +149,7 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
             if job_id in known or (offer_id and offer_id in known_offers):
                 skipped += 1
                 continue
-            priority = int(job.get("priority") or 100)
+            priority = len(data.get("queued") or []) + added + 1
             data["queued"].append({
                 "job_id": job_id,
                 "safe_id": safe_id(job_id),
@@ -203,8 +203,15 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
 def _sort_queue(data: dict[str, Any]) -> None:
     data["queued"] = sorted(
         data.get("queued") or [],
-        key=lambda item: (float(item.get("available_after") or 0), -int(item.get("priority") or 0), float(item.get("queued_ts") or 0)),
+        key=lambda item: (float(item.get("available_after") or 0), int(item.get("priority") or 999999), float(item.get("queued_ts") or 0)),
     )
+    _renumber_queue(data)
+
+
+def _renumber_queue(data: dict[str, Any]) -> None:
+    for index, item in enumerate(data.get("queued") or []):
+        item["priority"] = index + 1
+        item["manual_order"] = index
 
 
 def _dedupe_queue(data: dict[str, Any]) -> None:
@@ -284,9 +291,7 @@ def reorder(job_ids: list[str]) -> dict[str, Any]:
         reordered = [by_id[job_id] for job_id in job_ids if job_id in by_id]
         rest = [item for item in queued if item["job_id"] not in set(job_ids)]
         data["queued"] = reordered + rest
-        for index, item in enumerate(data["queued"]):
-            item["manual_order"] = index
-            item["priority"] = max(0, 1000 - index)
+        _renumber_queue(data)
         _write(data)
     append_event("queue.reorder", "Queue reordered", job_ids=job_ids)
     return get_queue_state()
@@ -295,13 +300,16 @@ def reorder(job_ids: list[str]) -> dict[str, Any]:
 def set_priority(job_id: str, priority: int) -> dict[str, Any]:
     with _LOCK:
         data = _read()
-        for item in data.get("queued") or []:
-            if item["job_id"] == job_id:
-                item["priority"] = int(priority)
-                break
-        _sort_queue(data)
+        queued = data.get("queued") or []
+        index = next((i for i, item in enumerate(queued) if item["job_id"] == job_id), -1)
+        if index >= 0:
+            item = queued.pop(index)
+            target = max(0, min(int(priority) - 1, len(queued)))
+            queued.insert(target, item)
+            data["queued"] = queued
+            _renumber_queue(data)
         _write(data)
-    append_event("queue.priority", f"Priority changed for {job_id}", job_id=job_id, priority=priority)
+    append_event("queue.position", f"Queue position changed for {job_id}", job_id=job_id, position=priority)
     return get_queue_state()
 
 
@@ -315,8 +323,7 @@ def move(job_id: str, direction: str) -> dict[str, Any]:
             target = max(0, min(target, len(queued) - 1))
             queued[index], queued[target] = queued[target], queued[index]
             data["queued"] = queued
-            for order, item in enumerate(data["queued"]):
-                item["priority"] = max(0, 1000 - order)
+            _renumber_queue(data)
             _write(data)
     append_event("queue.move", f"Moved {job_id} {direction}", job_id=job_id, direction=direction)
     return get_queue_state()
