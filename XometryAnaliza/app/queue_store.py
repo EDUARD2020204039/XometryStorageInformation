@@ -11,6 +11,7 @@ from . import settings
 
 _LOCK = threading.RLock()
 _WORKER: threading.Thread | None = None
+BUSY_RETRY_SECONDS = 600
 SHEET_KEYWORDS = (
     "sheet",
     "sheet metal",
@@ -19,7 +20,6 @@ SHEET_KEYWORDS = (
     "laser cutting",
     "bending",
     "tabla",
-    "tablÄƒ",
 )
 
 
@@ -29,7 +29,7 @@ def _queue_path():
 
 
 def _default_state() -> dict[str, Any]:
-    return {"active": None, "queued": [], "completed": [], "seen_job_ids": []}
+    return {"active": None, "queued": [], "completed": [], "seen_job_ids": [], "seen_offer_ids": [], "paused_until": 0, "pause_reason": ""}
 
 
 def _read() -> dict[str, Any]:
@@ -53,6 +53,10 @@ def _write(data: dict[str, Any]) -> dict[str, Any]:
 
 def _job_id(job: dict[str, Any]) -> str:
     return str(job.get("id") or job.get("job_id") or job.get("title") or job.get("offer_id") or "unknown")
+
+
+def _offer_id(job: dict[str, Any]) -> str:
+    return str(job.get("offer_id") or job.get("offerId") or "").strip()
 
 
 def _part_process_text(part: dict[str, Any]) -> str:
@@ -90,23 +94,37 @@ def _has_ready_geo(job_id: str) -> bool:
     return any(item.get("geo_exists") is True and item.get("target_path") for item in sheet.get("geo_items") or [])
 
 
+def _has_recent_attempt(job_id: str) -> bool:
+    state = load_job_state(job_id) or {}
+    sheet = state.get("sheet_metal_laser") or {}
+    completed_ts = float(sheet.get("completed_ts") or sheet.get("started_ts") or 0)
+    return bool(completed_ts and time.time() - completed_ts < settings.SHEET_AGENT_RETRY_SECONDS)
+
+
 def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[str, Any]:
     now = time.time()
     added = 0
     skipped = 0
     skipped_non_sheet = 0
     skipped_cached = 0
+    skipped_recent = 0
     with _LOCK:
         data = _read()
         known = {item["job_id"] for item in data.get("queued") or []}
+        known_offers = {str(item.get("offer_id")) for item in data.get("queued") or [] if item.get("offer_id")}
         active = data.get("active") or {}
         if active.get("job_id"):
             known.add(active["job_id"])
+        if active.get("offer_id"):
+            known_offers.add(str(active["offer_id"]))
         known.update(item.get("job_id") for item in data.get("completed") or [] if item.get("job_id"))
+        known_offers.update(str(item.get("offer_id")) for item in data.get("completed") or [] if item.get("offer_id"))
         known.update(str(item) for item in data.get("seen_job_ids") or [])
+        known_offers.update(str(item) for item in data.get("seen_offer_ids") or [])
 
         for job in jobs:
             job_id = _job_id(job)
+            offer_id = _offer_id(job)
             if not _is_sheet_laser_job(job):
                 skipped += 1
                 skipped_non_sheet += 1
@@ -115,7 +133,11 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
                 skipped += 1
                 skipped_cached += 1
                 continue
-            if job_id in known:
+            if _has_recent_attempt(job_id):
+                skipped += 1
+                skipped_recent += 1
+                continue
+            if job_id in known or (offer_id and offer_id in known_offers):
                 skipped += 1
                 continue
             priority = int(job.get("priority") or 100)
@@ -132,9 +154,15 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
                 "job": job,
             })
             known.add(job_id)
+            if offer_id:
+                known_offers.add(offer_id)
             seen = set(str(item) for item in data.get("seen_job_ids") or [])
             seen.add(job_id)
             data["seen_job_ids"] = sorted(seen)
+            if offer_id:
+                seen_offers = set(str(item) for item in data.get("seen_offer_ids") or [])
+                seen_offers.add(offer_id)
+                data["seen_offer_ids"] = sorted(seen_offers)
             added += 1
 
         _dedupe_queue(data)
@@ -149,6 +177,7 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
             skipped=skipped,
             skipped_non_sheet=skipped_non_sheet,
             skipped_cached=skipped_cached,
+            skipped_recent=skipped_recent,
         )
         ensure_worker()
     return {
@@ -157,6 +186,7 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
         "skipped": skipped,
         "skipped_non_sheet": skipped_non_sheet,
         "skipped_cached": skipped_cached,
+        "skipped_recent": skipped_recent,
         "queued": len(data.get("queued") or []),
     }
 
@@ -164,19 +194,26 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
 def _sort_queue(data: dict[str, Any]) -> None:
     data["queued"] = sorted(
         data.get("queued") or [],
-        key=lambda item: (-int(item.get("priority") or 0), float(item.get("queued_ts") or 0)),
+        key=lambda item: (float(item.get("available_after") or 0), -int(item.get("priority") or 0), float(item.get("queued_ts") or 0)),
     )
 
 
 def _dedupe_queue(data: dict[str, Any]) -> None:
     completed_ids = {item.get("job_id") for item in data.get("completed") or [] if item.get("job_id")}
+    completed_offers = {str(item.get("offer_id")) for item in data.get("completed") or [] if item.get("offer_id")}
     seen: set[str] = set()
+    seen_offers: set[str] = set()
     deduped = []
     for item in data.get("queued") or []:
         job_id = item.get("job_id")
+        offer_id = str(item.get("offer_id") or "")
         if not job_id or job_id in seen or job_id in completed_ids:
             continue
+        if offer_id and (offer_id in seen_offers or offer_id in completed_offers):
+            continue
         seen.add(job_id)
+        if offer_id:
+            seen_offers.add(offer_id)
         deduped.append(item)
     data["queued"] = deduped
 
@@ -190,6 +227,7 @@ def get_queue_state() -> dict[str, Any]:
             "worker_alive": bool(_WORKER and _WORKER.is_alive()),
             "queued_count": len(data.get("queued") or []),
             "completed_count": len(data.get("completed") or []),
+            "paused": float(data.get("paused_until") or 0) > time.time(),
         }
 
 
@@ -244,6 +282,12 @@ def _pop_next() -> dict[str, Any] | None:
         data = _read()
         if data.get("active") or not data.get("queued"):
             return None
+        if float(data.get("paused_until") or 0) > time.time():
+            return None
+        _sort_queue(data)
+        if float((data["queued"][0] or {}).get("available_after") or 0) > time.time():
+            _write(data)
+            return None
         item = data["queued"].pop(0)
         item["status"] = "running"
         item["started_ts"] = time.time()
@@ -252,22 +296,45 @@ def _pop_next() -> dict[str, Any] | None:
         return item
 
 
+def _sheet_status(result: dict[str, Any] | None) -> str | None:
+    return (result or {}).get("sheet_metal_laser", {}).get("status") if result else None
+
+
 def _finish(item: dict[str, Any], result: dict[str, Any] | None = None, error: str | None = None) -> None:
     with _LOCK:
         data = _read()
+        status = _sheet_status(result)
+        if status == "agent_busy":
+            item["status"] = "queued"
+            item["available_after"] = time.time() + BUSY_RETRY_SECONDS
+            item["busy_retries"] = int(item.get("busy_retries") or 0) + 1
+            data["active"] = None
+            data["paused_until"] = item["available_after"]
+            data["pause_reason"] = f"TecZone Dorina ocupat; reincerc {item.get('job_id')} dupa pauza"
+            data["queued"] = [item] + (data.get("queued") or [])
+            _sort_queue(data)
+            _write(data)
+            return
+
         done = {
             **item,
             "status": "failed" if error else "done",
             "completed_ts": time.time(),
             "error": error,
-            "result_status": (result or {}).get("sheet_metal_laser", {}).get("status") if result else None,
+            "result_status": status,
         }
         data["active"] = None
+        data["pause_reason"] = ""
+        data["paused_until"] = 0
         data["completed"] = [done] + (data.get("completed") or [])[:49]
         seen = set(str(value) for value in data.get("seen_job_ids") or [])
         if item.get("job_id"):
             seen.add(str(item["job_id"]))
         data["seen_job_ids"] = sorted(seen)
+        seen_offers = set(str(value) for value in data.get("seen_offer_ids") or [])
+        if item.get("offer_id"):
+            seen_offers.add(str(item["offer_id"]))
+        data["seen_offer_ids"] = sorted(seen_offers)
         _write(data)
 
 
@@ -281,6 +348,10 @@ def _worker_loop() -> None:
         try:
             result = process_job(item["job"])
             _finish(item, result=result)
+            if _sheet_status(result) == "agent_busy":
+                append_event("queue.agent_busy", f"TecZone busy; paused queue for {job_id}", job_id=job_id, offer_id=item.get("offer_id"), retry_seconds=BUSY_RETRY_SECONDS)
+                time.sleep(BUSY_RETRY_SECONDS)
+                continue
             append_event("queue.done", f"Finished queued job {job_id}", job_id=job_id, offer_id=item.get("offer_id"))
         except Exception as exc:
             _finish(item, error=f"{type(exc).__name__}: {exc}")
@@ -310,11 +381,15 @@ def recover_and_start() -> dict[str, Any]:
             append_event("queue.recover", f"Recovered stale active job {active.get('job_id')}", job_id=active.get("job_id"))
 
         seen = set(str(value) for value in data.get("seen_job_ids") or [])
+        seen_offers = set(str(value) for value in data.get("seen_offer_ids") or [])
         for bucket in ("queued", "completed"):
             for item in data.get(bucket) or []:
                 if item.get("job_id"):
                     seen.add(str(item["job_id"]))
+                if item.get("offer_id"):
+                    seen_offers.add(str(item["offer_id"]))
         data["seen_job_ids"] = sorted(seen)
+        data["seen_offer_ids"] = sorted(seen_offers)
         _dedupe_queue(data)
         _write(data)
         should_start = bool(data.get("queued"))

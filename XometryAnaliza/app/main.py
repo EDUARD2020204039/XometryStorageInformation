@@ -97,9 +97,12 @@ def dashboard() -> HTMLResponse:
     }
     async function refresh(){
       const data = await api('/api/queue');
-      document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'laptop lucreaza':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
+      const paused = data.paused;
+      const pauseUntil = data.paused_until ? new Date(data.paused_until * 1000).toLocaleTimeString() : '';
+      document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'laptop lucreaza':paused?'Dorina ocupata':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
       const active = data.active;
-      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':'idle'}">${active?`<div class="id">${active.job_id}</div><div class="meta">${active.title||''}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>`:'Laptopul nu proceseaza desfasurata acum.'}</div>`;
+      const idleText = paused ? `Dorina este ocupata in TecZone. Reiau coada la ${pauseUntil}.<div class="meta">${data.pause_reason||''}</div>` : 'Laptopul nu proceseaza desfasurata acum.';
+      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${active.job_id}</div><div class="meta">${active.title||''}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>`:idleText}</div>`;
       document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi sheet/laser in asteptare.</div>';
       const logs = await api('/api/agents/logs?limit=20');
       document.getElementById('logs').textContent = (logs.items||[]).reverse().map(x => `${new Date((x.ts||0)*1000).toLocaleTimeString()} ${x.type}: ${x.message}`).join('\\n');
