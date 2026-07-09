@@ -30,7 +30,7 @@ def _queue_path():
 
 
 def _default_state() -> dict[str, Any]:
-    return {"active": None, "queued": [], "completed": [], "seen_job_ids": [], "seen_offer_ids": [], "paused_until": 0, "pause_reason": ""}
+    return {"active": None, "queued": [], "completed": [], "seen_job_ids": [], "seen_offer_ids": [], "paused_until": 0, "pause_reason": "", "paused_item": None}
 
 
 def _read() -> dict[str, Any]:
@@ -226,11 +226,32 @@ def _dedupe_queue(data: dict[str, Any]) -> None:
     data["queued"] = deduped
 
 
+def _item_with_state(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not item:
+        return None
+    enriched = dict(item)
+    state = load_job_state(str(item.get("job_id") or "")) or {}
+    sheet = state.get("sheet_metal_laser") or {}
+    result = sheet.get("ofertare_result") or {}
+    project_root = result.get("projectRoot") or result.get("project_root")
+    if project_root:
+        enriched["project_root"] = project_root
+        enriched["project_name"] = str(project_root).replace("\\", "/").rstrip("/").split("/")[-1]
+    enriched["agent_status"] = sheet.get("status")
+    return enriched
+
+
 def get_queue_state() -> dict[str, Any]:
     with _LOCK:
         data = _read()
+        paused_item = data.get("paused_item")
+        if not paused_item and float(data.get("paused_until") or 0) > time.time():
+            reason = str(data.get("pause_reason") or "")
+            paused_item = next((item for item in data.get("queued") or [] if item.get("job_id") and item.get("job_id") in reason), None)
         return {
             **data,
+            "active": _item_with_state(data.get("active")),
+            "paused_item": _item_with_state(paused_item),
             "running": bool(data.get("active")),
             "worker_alive": bool(_WORKER and _WORKER.is_alive()),
             "queued_count": len(data.get("queued") or []),
@@ -300,6 +321,7 @@ def _pop_next() -> dict[str, Any] | None:
         item["status"] = "running"
         item["started_ts"] = time.time()
         data["active"] = item
+        data["paused_item"] = None
         _write(data)
         return item
 
@@ -336,6 +358,7 @@ def _finish(item: dict[str, Any], result: dict[str, Any] | None = None, error: s
             data["active"] = None
             data["paused_until"] = item["available_after"]
             data["pause_reason"] = f"TecZone Dorina ocupat; reincerc {item.get('job_id')} dupa pauza calculata"
+            data["paused_item"] = dict(item)
             data["queued"] = [item] + (data.get("queued") or [])
             _sort_queue(data)
             _write(data)
@@ -354,9 +377,11 @@ def _finish(item: dict[str, Any], result: dict[str, Any] | None = None, error: s
         if cooldown_seconds and data.get("queued"):
             data["paused_until"] = time.time() + cooldown_seconds
             data["pause_reason"] = f"Pauza 2 minute dupa salvarea GEO pentru {item.get('job_id')}"
+            data["paused_item"] = dict(item)
         else:
             data["pause_reason"] = ""
             data["paused_until"] = 0
+            data["paused_item"] = None
         data["completed"] = [done] + (data.get("completed") or [])[:49]
         seen = set(str(value) for value in data.get("seen_job_ids") or [])
         if item.get("job_id"):

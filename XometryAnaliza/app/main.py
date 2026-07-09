@@ -72,6 +72,7 @@ def dashboard() -> HTMLResponse:
     .job{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px;border-bottom:1px solid #eef2f7}
     .job:last-child{border-bottom:0}.id{font-weight:700}.id a{color:#0f172a;text-decoration:none}.id a:hover{color:#0958d9;text-decoration:underline}.meta{font-size:12px;color:#52606d;margin-top:4px}
     .pill{display:inline-flex;align-items:center;min-height:22px;padding:0 8px;border-radius:999px;background:#e6f4ff;color:#0958d9;font-size:12px;font-weight:700}
+    .button{display:inline-flex;align-items:center;justify-content:center;height:30px;padding:0 10px;border:1px solid #16a34a;border-radius:4px;background:#ecfdf3;color:#166534;text-decoration:none;font-size:12px;font-weight:700}
     button,input{height:30px;border:1px solid #cbd5e1;border-radius:4px;background:white;font-weight:700}
     button{cursor:pointer;padding:0 9px} input{width:62px;padding:0 6px}
     .actions{display:flex;align-items:center;gap:6px}.log{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap}
@@ -97,6 +98,11 @@ def dashboard() -> HTMLResponse:
       const text = `${prefix}${label}`;
       return url ? `<a href="${esc(url)}" target="_blank" rel="noreferrer">${text}</a>` : text;
     }
+    function projectButton(item){
+      if (!item?.offer_id) return '';
+      if (!item?.project_root) return `<div style="margin-top:10px"><a class="button" href="http://192.168.2.26:8585" target="_blank" rel="noreferrer">Deschide Ofertare Dorina</a></div>`;
+      return `<div style="margin-top:10px"><a class="button" href="/api/agents/project/${encodeURIComponent(item.offer_id)}" target="_blank" rel="noreferrer">Dosar activ: ${esc(item.project_name || item.project_root)}</a></div>`;
+    }
     async function move(id, direction){ await api('/api/queue/'+encodeURIComponent(id)+'/move',{method:'POST',body:JSON.stringify({direction})}); refresh(); }
     async function priority(id, el){ await api('/api/queue/'+encodeURIComponent(id)+'/priority',{method:'POST',body:JSON.stringify({priority:Number(el.value||100)})}); refresh(); }
     function jobHtml(item, i){
@@ -110,8 +116,10 @@ def dashboard() -> HTMLResponse:
       const pauseUntil = data.paused_until ? new Date(data.paused_until * 1000).toLocaleTimeString() : '';
       document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'laptop lucreaza':paused?'Dorina ocupata':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
       const active = data.active;
+      const pausedItem = data.paused_item;
       const idleText = paused ? `Dorina este ocupata in TecZone. Reiau coada la ${pauseUntil}.<div class="meta">${data.pause_reason||''}</div>` : 'Laptopul nu proceseaza desfasurata acum.';
-      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${jobName(active)}</div><div class="meta">${esc(active.title||'')}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>`:idleText}</div>`;
+      const pausedHtml = pausedItem ? `<div class="id">${jobName(pausedItem)}</div><div class="meta">${esc(data.pause_reason||'')}</div>${projectButton(pausedItem)}` : idleText;
+      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${jobName(active)}</div><div class="meta">${esc(active.title||'')}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>${projectButton(active)}`:pausedHtml}</div>`;
       document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi sheet/laser in asteptare.</div>';
       const logs = await api('/api/agents/logs?limit=20');
       document.getElementById('logs').textContent = (logs.items||[]).reverse().map(x => `${new Date((x.ts||0)*1000).toLocaleTimeString()} ${x.type}: ${x.message}`).join('\\n');
@@ -242,6 +250,83 @@ def geo_status(offer_id: str) -> dict[str, Any]:
         "bend_report": bend_report,
         "state": state,
     }
+
+
+@app.get("/api/agents/project/{offer_id}", response_class=HTMLResponse)
+def project_status_view(offer_id: str) -> HTMLResponse:
+    state = find_job_by_offer_id(offer_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Offer state not found")
+    job = state.get("job") or {}
+    sheet = state.get("sheet_metal_laser") or {}
+    result = sheet.get("ofertare_result") or {}
+    project_root = str(result.get("projectRoot") or result.get("project_root") or "")
+    files = [str(item) for item in result.get("files") or []]
+    warnings = [str(item) for item in result.get("warnings") or []]
+    geo_items = sheet.get("geo_items") or []
+    job_id = str(state.get("job_id") or job.get("id") or offer_id)
+    xometry_url = str(job.get("link") or job.get("url") or "")
+    geo_url = f"/api/agents/geo/{quote(offer_id, safe='')}/view"
+    rows = "".join(f"<li><code>{html.escape(path)}</code></li>" for path in files) or "<li>Nu exista fisiere raportate inca.</li>"
+    warning_rows = "".join(f"<li>{html.escape(text)}</li>" for text in warnings) or "<li>Nu sunt warning-uri raportate.</li>"
+    geo_rows = "".join(
+        f"<li>{html.escape(str(item.get('part_name') or item.get('partName') or 'part'))}: "
+        f"<code>{html.escape(str(item.get('target_path') or item.get('targetPath') or ''))}</code></li>"
+        for item in geo_items
+    ) or "<li>Nu exista GEO salvat inca.</li>"
+    xometry_link = (
+        f'<a class="button secondary" href="{html.escape(xometry_url, quote=True)}" target="_blank" rel="noreferrer">Deschide oferta Xometry</a>'
+        if xometry_url
+        else ""
+    )
+    return HTMLResponse(f"""<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dosar activ - {html.escape(job_id)}</title>
+  <style>
+    body{{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}}
+    header{{padding:22px 26px;background:#111827;color:white}}
+    h1{{margin:0;font-size:24px}} .sub{{margin-top:6px;color:#cbd5e1}}
+    main{{padding:20px 26px;display:grid;gap:16px}}
+    section{{background:white;border:1px solid #d9e2ec;border-radius:8px;padding:16px}}
+    h2{{margin:0 0 10px;font-size:16px}} code{{background:#f1f5f9;padding:2px 5px;border-radius:4px}}
+    ul{{margin:8px 0 0;padding-left:22px}} li{{margin:6px 0}}
+    .button{{display:inline-flex;align-items:center;justify-content:center;height:34px;padding:0 12px;border:1px solid #1677ff;border-radius:5px;background:#1677ff;color:white;text-decoration:none;font-weight:700;margin-right:8px}}
+    .secondary{{background:white;color:#0958d9}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dosar activ - {html.escape(job_id)}</h1>
+    <div class="sub">Status: {html.escape(str(sheet.get("status") or "necunoscut"))} &middot; Oferta {html.escape(str(offer_id))}</div>
+  </header>
+  <main>
+    <section>
+      <h2>Actiuni</h2>
+      {xometry_link}
+      <a class="button secondary" href="{geo_url}" target="_blank" rel="noreferrer">Desfasurate GEO</a>
+    </section>
+    <section>
+      <h2>Folder Ofertare</h2>
+      <code>{html.escape(project_root or "Nu exista projectRoot inca.")}</code>
+    </section>
+    <section>
+      <h2>GEO</h2>
+      <ul>{geo_rows}</ul>
+    </section>
+    <section>
+      <h2>Warning-uri</h2>
+      <ul>{warning_rows}</ul>
+    </section>
+    <section>
+      <h2>Fisiere</h2>
+      <ul>{rows}</ul>
+    </section>
+  </main>
+</body>
+</html>""")
 
 
 @app.get("/api/agents/bend/{offer_id}")

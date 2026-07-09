@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from . import settings
-from .ofertare_client import extract_geo_items, run_ofertare_automata
+from .ofertare_client import extract_geo_items, run_ofertare_automata, run_teczone_folder
 from .store import append_event, load_job_state, save_job_state
 from .telegram_log import send_log
 from .xometry_backend_client import lookup_dosar_references
@@ -173,8 +173,13 @@ class SheetMetalLaserAgent:
                 "completed_ts": time.time(),
             }
 
+        last_status = str(previous_sheet.get("status") or "").lower()
         last_attempt_ts = previous_sheet.get("completed_ts") or previous_sheet.get("started_ts") or 0
-        if last_attempt_ts and time.time() - float(last_attempt_ts) < settings.SHEET_AGENT_RETRY_SECONDS:
+        if (
+            last_status != "agent_busy"
+            and last_attempt_ts
+            and time.time() - float(last_attempt_ts) < settings.SHEET_AGENT_RETRY_SECONDS
+        ):
             retry_after = max(0, int(settings.SHEET_AGENT_RETRY_SECONDS - (time.time() - float(last_attempt_ts))))
             append_event("sheet.skip_recent", f"Sheet agent skipped recent attempt for {job_id}", job_id=job_id, offer_id=offer_id, retry_after_seconds=retry_after)
             return {
@@ -206,7 +211,12 @@ class SheetMetalLaserAgent:
             send_log(f"XometryAnaliza: SheetMetal/Laser agent pornit pentru {job_id}. Generez desfasurata GEO.")
 
         try:
-            result = run_ofertare_automata(job)
+            previous_project = (previous_sheet.get("ofertare_result") or {}).get("projectRoot")
+            if last_status == "agent_busy" and previous_project:
+                result = run_teczone_folder(str(previous_project))
+                append_event("sheet.retry_folder", f"Retrying TecZone on existing folder for {job_id}", job_id=job_id, offer_id=offer_id, project_root=previous_project)
+            else:
+                result = run_ofertare_automata(job)
             raw_geo_items = extract_geo_items(result)
             geo_items = _filter_geo_items_for_sheet_parts(job, raw_geo_items)
             failure_reason = _ofertare_failure_reason(result)
