@@ -1,4 +1,5 @@
 from typing import Any
+from urllib.parse import quote
 import time
 
 import requests
@@ -52,6 +53,26 @@ def run_teczone_folder(project_path: str) -> dict[str, Any]:
     )
     response.raise_for_status()
     return response.json()
+
+
+def find_project_folder_for_job(job_id: str) -> dict[str, Any] | None:
+    if not job_id:
+        return None
+    try:
+        response = requests.get(
+            f"{settings.OFERTARE_AUTOMATA_URL}/api/project-folder-for-job/{quote(str(job_id), safe='')}",
+            headers=_headers(),
+            timeout=(settings.OFERTARE_AUTOMATA_CONNECT_TIMEOUT, 8),
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        data = response.json()
+        if data.get("path"):
+            return data
+    except Exception:
+        return None
+    return None
 
 
 def poll_automation_job(status_url: str, headers: dict[str, str]) -> dict[str, Any]:

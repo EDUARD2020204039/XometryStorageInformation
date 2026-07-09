@@ -5,7 +5,8 @@ import time
 from typing import Any
 
 from .agents import process_job
-from .store import append_event, load_job_state, safe_id
+from .ofertare_client import find_project_folder_for_job
+from .store import append_event, load_job_state, safe_id, save_job_state
 from . import settings
 
 
@@ -234,6 +235,21 @@ def _item_with_state(item: dict[str, Any] | None) -> dict[str, Any] | None:
     sheet = state.get("sheet_metal_laser") or {}
     result = sheet.get("ofertare_result") or {}
     project_root = result.get("projectRoot") or result.get("project_root")
+    if not project_root and str(sheet.get("status") or "").lower() == "running":
+        found = find_project_folder_for_job(str(item.get("job_id") or ""))
+        if found and found.get("path"):
+            project_root = found.get("path")
+            sheet = {
+                **sheet,
+                "ofertare_result": {
+                    **result,
+                    "projectRoot": project_root,
+                    "projectName": found.get("name"),
+                    "discoveredWhileRunning": True,
+                },
+            }
+            state["sheet_metal_laser"] = sheet
+            save_job_state(str(item.get("job_id") or ""), state)
     if project_root:
         enriched["project_root"] = project_root
         enriched["project_name"] = str(project_root).replace("\\", "/").rstrip("/").split("/")[-1]
