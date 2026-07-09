@@ -5,12 +5,22 @@ import time
 from typing import Any
 
 from .agents import process_job
-from .store import append_event, safe_id
+from .store import append_event, load_job_state, safe_id
 from . import settings
 
 
 _LOCK = threading.RLock()
 _WORKER: threading.Thread | None = None
+SHEET_KEYWORDS = (
+    "sheet",
+    "sheet metal",
+    "metal sheet",
+    "laser",
+    "laser cutting",
+    "bending",
+    "tabla",
+    "tablÄƒ",
+)
 
 
 def _queue_path():
@@ -45,10 +55,47 @@ def _job_id(job: dict[str, Any]) -> str:
     return str(job.get("id") or job.get("job_id") or job.get("title") or job.get("offer_id") or "unknown")
 
 
+def _part_process_text(part: dict[str, Any]) -> str:
+    values = [
+        part.get("process"),
+        part.get("processType"),
+        part.get("process_type"),
+        part.get("material"),
+        part.get("part_name"),
+        part.get("name"),
+    ]
+    processes = part.get("processes")
+    if isinstance(processes, list):
+        values.extend(processes)
+    elif processes:
+        values.append(processes)
+    return " ".join(str(value or "") for value in values).lower()
+
+
+def _is_sheet_laser_job(job: dict[str, Any]) -> bool:
+    for part in job.get("parts") or []:
+        if isinstance(part, dict) and any(keyword in _part_process_text(part) for keyword in SHEET_KEYWORDS):
+            return True
+
+    haystack = " ".join(
+        str(job.get(key) or "")
+        for key in ("id", "title", "job_name", "material", "process", "remarks", "raw_text")
+    ).lower()
+    return any(keyword in haystack for keyword in SHEET_KEYWORDS)
+
+
+def _has_ready_geo(job_id: str) -> bool:
+    state = load_job_state(job_id) or {}
+    sheet = state.get("sheet_metal_laser") or {}
+    return any(item.get("geo_exists") is True and item.get("target_path") for item in sheet.get("geo_items") or [])
+
+
 def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[str, Any]:
     now = time.time()
     added = 0
     skipped = 0
+    skipped_non_sheet = 0
+    skipped_cached = 0
     with _LOCK:
         data = _read()
         known = {item["job_id"] for item in data.get("queued") or []}
@@ -60,6 +107,14 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
 
         for job in jobs:
             job_id = _job_id(job)
+            if not _is_sheet_laser_job(job):
+                skipped += 1
+                skipped_non_sheet += 1
+                continue
+            if _has_ready_geo(job_id):
+                skipped += 1
+                skipped_cached += 1
+                continue
             if job_id in known:
                 skipped += 1
                 continue
@@ -86,9 +141,24 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
         _sort_queue(data)
         _write(data)
     if added:
-        append_event("queue.enqueue", f"Queued {added} jobs from {source}", source=source, added=added, skipped=skipped)
+        append_event(
+            "queue.enqueue",
+            f"Queued {added} sheet/laser jobs from {source}",
+            source=source,
+            added=added,
+            skipped=skipped,
+            skipped_non_sheet=skipped_non_sheet,
+            skipped_cached=skipped_cached,
+        )
         ensure_worker()
-    return {"ok": True, "added": added, "skipped": skipped, "queued": len(data.get("queued") or [])}
+    return {
+        "ok": True,
+        "added": added,
+        "skipped": skipped,
+        "skipped_non_sheet": skipped_non_sheet,
+        "skipped_cached": skipped_cached,
+        "queued": len(data.get("queued") or []),
+    }
 
 
 def _sort_queue(data: dict[str, Any]) -> None:

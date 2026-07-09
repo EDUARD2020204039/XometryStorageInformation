@@ -79,13 +79,13 @@ def dashboard() -> HTMLResponse:
   </style>
 </head>
 <body>
-  <header><div><h1>XometryAnaliza</h1><div class="sub">queue, agents, GEO, bend status</div></div><div id="summary"></div></header>
+  <header><div><h1>XometryAnaliza</h1><div class="sub">TecZone laptop queue, GEO, bend status</div></div><div id="summary"></div></header>
   <main>
     <div>
       <section id="active"></section>
       <section style="margin-top:16px"><h2>Logs</h2><div id="logs" class="panel log"></div></section>
     </div>
-    <section><h2>Urmatoarele joburi</h2><div id="queue"></div></section>
+    <section><h2>Urmatoarele pentru laptop</h2><div id="queue"></div></section>
   </main>
   <script>
     const api = async (url, options={}) => (await fetch(url,{headers:{'Content-Type':'application/json'},...options})).json();
@@ -97,10 +97,10 @@ def dashboard() -> HTMLResponse:
     }
     async function refresh(){
       const data = await api('/api/queue');
-      document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'lucreaza':'idle'}</span> <span class="pill">${data.queued_count} in coada</span>`;
+      document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'laptop lucreaza':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
       const active = data.active;
-      document.getElementById('active').innerHTML = `<h2>Job activ</h2><div class="panel ${active?'active':'idle'}">${active?`<div class="id">${active.job_id}</div><div class="meta">${active.title||''}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>`:'Nu lucreaza acum.'}</div>`;
-      document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi in asteptare.</div>';
+      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':'idle'}">${active?`<div class="id">${active.job_id}</div><div class="meta">${active.title||''}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>`:'Laptopul nu proceseaza desfasurata acum.'}</div>`;
+      document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi sheet/laser in asteptare.</div>';
       const logs = await api('/api/agents/logs?limit=20');
       document.getElementById('logs').textContent = (logs.items||[]).reverse().map(x => `${new Date((x.ts||0)*1000).toLocaleTimeString()} ${x.type}: ${x.message}`).join('\\n');
     }
