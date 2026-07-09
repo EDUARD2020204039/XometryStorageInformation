@@ -99,9 +99,11 @@ class RouterAgent:
     def route(self, job: dict[str, Any]) -> list[str]:
         text = _text(job)
         agents = []
-        if any(token in text for token in ("cnc", "milling", "turning", "machining")):
-            agents.append("cnc")
-        if any(token in text for token in SHEET_KEYWORDS):
+        parts = [part for part in job.get("parts") or [] if isinstance(part, dict)]
+        if parts:
+            if _sheet_part_ids(job):
+                agents.append("sheet_metal_laser")
+        elif any(token in text for token in SHEET_KEYWORDS):
             agents.append("sheet_metal_laser")
         return agents
 

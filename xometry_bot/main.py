@@ -321,7 +321,8 @@ def run_iteration():
                     job["id"] = payload["title"]
                 if payload.get("url"):
                     job["link"] = payload["url"]
-                if _requires_geo_before_notify(job) or _sheet_part_ids(job):
+                has_detailed_parts = bool(job.get("parts"))
+                if _sheet_part_ids(job) or (not has_detailed_parts and _requires_geo_before_notify(job)):
                     detailed_agent_jobs.append(dict(job))
 
             if detailed_agent_jobs:

@@ -77,6 +77,13 @@ def _part_process_text(part: dict[str, Any]) -> str:
 
 
 def _is_sheet_laser_job(job: dict[str, Any]) -> bool:
+    parts = [part for part in job.get("parts") or [] if isinstance(part, dict)]
+    if parts:
+        return any(
+            any(keyword in _part_process_text(part) for keyword in SHEET_KEYWORDS)
+            for part in parts
+        )
+
     for part in job.get("parts") or []:
         if isinstance(part, dict) and any(keyword in _part_process_text(part) for keyword in SHEET_KEYWORDS):
             return True
