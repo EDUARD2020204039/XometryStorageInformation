@@ -70,7 +70,7 @@ def dashboard() -> HTMLResponse:
     h2{margin:0;padding:12px 14px;border-bottom:1px solid #e5eaf0;font-size:15px;background:#f8fafc}
     .panel{padding:12px 14px}.active{border-left:5px solid #1677ff}.idle{border-left:5px solid #94a3b8}
     .job{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px;border-bottom:1px solid #eef2f7}
-    .job:last-child{border-bottom:0}.id{font-weight:700}.meta{font-size:12px;color:#52606d;margin-top:4px}
+    .job:last-child{border-bottom:0}.id{font-weight:700}.id a{color:#0f172a;text-decoration:none}.id a:hover{color:#0958d9;text-decoration:underline}.meta{font-size:12px;color:#52606d;margin-top:4px}
     .pill{display:inline-flex;align-items:center;min-height:22px;padding:0 8px;border-radius:999px;background:#e6f4ff;color:#0958d9;font-size:12px;font-weight:700}
     button,input{height:30px;border:1px solid #cbd5e1;border-radius:4px;background:white;font-weight:700}
     button{cursor:pointer;padding:0 9px} input{width:62px;padding:0 6px}
@@ -89,11 +89,20 @@ def dashboard() -> HTMLResponse:
   </main>
   <script>
     const api = async (url, options={}) => (await fetch(url,{headers:{'Content-Type':'application/json'},...options})).json();
+    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const xometryUrl = (item) => item?.url || (item?.offer_id ? `https://partner.xometry.eu/offers/${encodeURIComponent(item.offer_id)}?gsh=true&source=jobs&locale=en` : '');
+    function jobName(item, prefix=''){
+      const url = xometryUrl(item);
+      const label = esc(item?.job_id || item?.title || item?.offer_id || 'oferta');
+      const text = `${prefix}${label}`;
+      return url ? `<a href="${esc(url)}" target="_blank" rel="noreferrer">${text}</a>` : text;
+    }
     async function move(id, direction){ await api('/api/queue/'+encodeURIComponent(id)+'/move',{method:'POST',body:JSON.stringify({direction})}); refresh(); }
     async function priority(id, el){ await api('/api/queue/'+encodeURIComponent(id)+'/priority',{method:'POST',body:JSON.stringify({priority:Number(el.value||100)})}); refresh(); }
     function jobHtml(item, i){
-      const title = item.title || item.job_id;
-      return `<div class="job"><div><div class="id">${i+1}. ${item.job_id}</div><div class="meta">${title}</div><div class="meta">${item.offer_id||''} ${item.source||''}</div></div><div class="actions"><input value="${item.priority||0}" onchange="priority('${item.job_id}',this)"><button onclick="move('${item.job_id}','up')">Up</button><button onclick="move('${item.job_id}','down')">Down</button></div></div>`;
+      const title = esc(item.title || item.job_id);
+      const id = esc(item.job_id);
+      return `<div class="job"><div><div class="id">${jobName(item, `${i+1}. `)}</div><div class="meta">${title}</div><div class="meta">${esc(item.offer_id||'')} ${esc(item.source||'')}</div></div><div class="actions"><input value="${esc(item.priority||0)}" onchange="priority('${id}',this)"><button onclick="move('${id}','up')">Up</button><button onclick="move('${id}','down')">Down</button></div></div>`;
     }
     async function refresh(){
       const data = await api('/api/queue');
@@ -102,7 +111,7 @@ def dashboard() -> HTMLResponse:
       document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'laptop lucreaza':paused?'Dorina ocupata':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
       const active = data.active;
       const idleText = paused ? `Dorina este ocupata in TecZone. Reiau coada la ${pauseUntil}.<div class="meta">${data.pause_reason||''}</div>` : 'Laptopul nu proceseaza desfasurata acum.';
-      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${active.job_id}</div><div class="meta">${active.title||''}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>`:idleText}</div>`;
+      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${jobName(active)}</div><div class="meta">${esc(active.title||'')}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>`:idleText}</div>`;
       document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi sheet/laser in asteptare.</div>';
       const logs = await api('/api/agents/logs?limit=20');
       document.getElementById('logs').textContent = (logs.items||[]).reverse().map(x => `${new Date((x.ts||0)*1000).toLocaleTimeString()} ${x.type}: ${x.message}`).join('\\n');
