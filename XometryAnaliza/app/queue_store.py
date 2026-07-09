@@ -11,7 +11,8 @@ from . import settings
 
 _LOCK = threading.RLock()
 _WORKER: threading.Thread | None = None
-BUSY_RETRY_SECONDS = 600
+POST_SAVE_DELAY_SECONDS = 120
+AGENT_BUSY_RETRY_SECONDS = 120
 SHEET_KEYWORDS = (
     "sheet",
     "sheet metal",
@@ -307,21 +308,38 @@ def _sheet_status(result: dict[str, Any] | None) -> str | None:
     return (result or {}).get("sheet_metal_laser", {}).get("status") if result else None
 
 
-def _finish(item: dict[str, Any], result: dict[str, Any] | None = None, error: str | None = None) -> None:
+def _process_seconds(item: dict[str, Any]) -> float:
+    started = float(item.get("started_ts") or 0)
+    return max(0, time.time() - started) if started else 0
+
+
+def _pause_remaining() -> float:
+    with _LOCK:
+        data = _read()
+        if data.get("active") or not data.get("queued"):
+            return 0
+        return max(0, float(data.get("paused_until") or 0) - time.time())
+
+
+def _finish(item: dict[str, Any], result: dict[str, Any] | None = None, error: str | None = None) -> int:
     with _LOCK:
         data = _read()
         status = _sheet_status(result)
+        process_seconds = _process_seconds(item)
+        if process_seconds:
+            data["last_process_seconds"] = process_seconds
         if status == "agent_busy":
+            retry_seconds = AGENT_BUSY_RETRY_SECONDS
             item["status"] = "queued"
-            item["available_after"] = time.time() + BUSY_RETRY_SECONDS
+            item["available_after"] = time.time() + retry_seconds
             item["busy_retries"] = int(item.get("busy_retries") or 0) + 1
             data["active"] = None
             data["paused_until"] = item["available_after"]
-            data["pause_reason"] = f"TecZone Dorina ocupat; reincerc {item.get('job_id')} dupa pauza"
+            data["pause_reason"] = f"TecZone Dorina ocupat; reincerc {item.get('job_id')} dupa pauza calculata"
             data["queued"] = [item] + (data.get("queued") or [])
             _sort_queue(data)
             _write(data)
-            return
+            return retry_seconds
 
         done = {
             **item,
@@ -329,10 +347,16 @@ def _finish(item: dict[str, Any], result: dict[str, Any] | None = None, error: s
             "completed_ts": time.time(),
             "error": error,
             "result_status": status,
+            "process_seconds": process_seconds,
         }
         data["active"] = None
-        data["pause_reason"] = ""
-        data["paused_until"] = 0
+        cooldown_seconds = POST_SAVE_DELAY_SECONDS if status == "geo_ready" and not error else 0
+        if cooldown_seconds and data.get("queued"):
+            data["paused_until"] = time.time() + cooldown_seconds
+            data["pause_reason"] = f"Pauza 2 minute dupa salvarea GEO pentru {item.get('job_id')}"
+        else:
+            data["pause_reason"] = ""
+            data["paused_until"] = 0
         data["completed"] = [done] + (data.get("completed") or [])[:49]
         seen = set(str(value) for value in data.get("seen_job_ids") or [])
         if item.get("job_id"):
@@ -343,26 +367,39 @@ def _finish(item: dict[str, Any], result: dict[str, Any] | None = None, error: s
             seen_offers.add(str(item["offer_id"]))
         data["seen_offer_ids"] = sorted(seen_offers)
         _write(data)
+        return cooldown_seconds
 
 
 def _worker_loop() -> None:
     while True:
         item = _pop_next()
         if not item:
+            pause_seconds = _pause_remaining()
+            if pause_seconds:
+                time.sleep(pause_seconds)
+                continue
             return
         job_id = item["job_id"]
         append_event("queue.start", f"Started queued job {job_id}", job_id=job_id, offer_id=item.get("offer_id"))
         try:
             result = process_job(item["job"])
-            _finish(item, result=result)
+            delay_seconds = _finish(item, result=result)
             if _sheet_status(result) == "agent_busy":
-                append_event("queue.agent_busy", f"TecZone busy; paused queue for {job_id}", job_id=job_id, offer_id=item.get("offer_id"), retry_seconds=BUSY_RETRY_SECONDS)
-                time.sleep(BUSY_RETRY_SECONDS)
+                append_event("queue.agent_busy", f"TecZone busy; paused queue for {job_id}", job_id=job_id, offer_id=item.get("offer_id"), retry_seconds=delay_seconds)
+                time.sleep(delay_seconds)
                 continue
             append_event("queue.done", f"Finished queued job {job_id}", job_id=job_id, offer_id=item.get("offer_id"))
+            if delay_seconds:
+                append_event("queue.cooldown", f"Paused queue after {job_id} for {delay_seconds}s", job_id=job_id, offer_id=item.get("offer_id"), retry_seconds=delay_seconds)
+                time.sleep(delay_seconds)
+                continue
         except Exception as exc:
             _finish(item, error=f"{type(exc).__name__}: {exc}")
             append_event("queue.failed", f"Queued job failed {job_id}: {exc}", job_id=job_id, offer_id=item.get("offer_id"))
+
+        pause_seconds = _pause_remaining()
+        if pause_seconds:
+            time.sleep(pause_seconds)
 
 
 def ensure_worker() -> bool:

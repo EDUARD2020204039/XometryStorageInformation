@@ -207,13 +207,15 @@ class SheetMetalLaserAgent:
 
         try:
             result = run_ofertare_automata(job)
-            geo_items = _filter_geo_items_for_sheet_parts(job, extract_geo_items(result))
+            raw_geo_items = extract_geo_items(result)
+            geo_items = _filter_geo_items_for_sheet_parts(job, raw_geo_items)
             failure_reason = _ofertare_failure_reason(result)
             bend_report = build_bend_artifacts(job_id, offer_id, result, geo_items) if offer_id and not failure_reason else None
-            agent_busy = bool(geo_items) and all(
+            agent_busy_items = geo_items or raw_geo_items
+            agent_busy = bool(agent_busy_items) and all(
                 str(item.get("classification") or "").lower() == "agent_busy"
                 or "agent is already processing" in str(item.get("reason") or "").lower()
-                for item in geo_items
+                for item in agent_busy_items
             )
             status = (
                 "agent_busy"
