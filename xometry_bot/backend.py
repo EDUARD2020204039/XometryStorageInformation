@@ -25,7 +25,8 @@ def send_to_backend(jobs):
             continue
         if job_id and str(job_id).startswith("RFQ-"):
             continue
-        if job_id and str(job_id).startswith("HJO-"):
+        job_id_text = str(job_id or "")
+        if job_id_text.startswith(("HJO-", "J-")):
             url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
         else:
             url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"

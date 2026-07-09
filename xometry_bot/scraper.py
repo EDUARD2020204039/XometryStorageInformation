@@ -160,7 +160,7 @@ def _join_unique(values):
     return ", ".join(uniq) if uniq else "Unknown"
 
 
-CANONICAL_JOB_ID_RE = re.compile(r"\bJ-\d+(?:-\d+)?\b", re.IGNORECASE)
+CANONICAL_JOB_ID_RE = re.compile(r"\b(?:HJO|J)-\d+(?:-\d+)?\b", re.IGNORECASE)
 CANONICAL_RFQ_ID_RE = re.compile(r"\bRFQ-\d+(?:-\d+)?\b", re.IGNORECASE)
 
 
@@ -181,7 +181,7 @@ def _is_canonical_job_id(job_id):
 
 
 def _is_gsh_job_id(job_id):
-    return str(job_id or "").strip().upper().startswith("HJO-")
+    return str(job_id or "").strip().upper().startswith(("HJO-", "J-"))
 
 
 def _build_offer_link(offer_id=None, job_id=None, prefer_job_id=False):
@@ -1488,7 +1488,7 @@ def extract_job_data(card: Locator, job_type="Standard"):
                  job_id = header.inner_text().strip()
              else:
                  # Fallback regex
-                 match = re.search(r'(J-\d+-\d+|RFQ-\d+)', card_text)
+                 match = re.search(r'((?:HJO|J)-\d+(?:-\d+)?|RFQ-\d+)', card_text)
                  if match:
                      job_id = match.group(1)
              
@@ -1581,7 +1581,7 @@ def extract_job_data(card: Locator, job_type="Standard"):
             # Fallback if no specific offer link found, but there is an ID
             if not link and job_id != "Unknown":
                 # Construct link based on ID pattern
-                if job_id.startswith("J-"):
+                if job_id.startswith(("HJO-", "J-")):
                      # Standard Job: https://partner.xometry.eu/offers/J-1736113-306487
                      link = f"https://partner.xometry.eu/offers/{job_id}"
                 elif job_id.startswith("RFQ-"):

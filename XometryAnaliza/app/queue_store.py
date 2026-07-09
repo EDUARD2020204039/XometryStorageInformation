@@ -483,6 +483,7 @@ def recover_and_start() -> dict[str, Any]:
         data["seen_job_ids"] = sorted(seen)
         data["seen_offer_ids"] = sorted(seen_offers)
         _dedupe_queue(data)
+        _sort_queue(data)
         _write(data)
         should_start = bool(data.get("queued"))
 

@@ -260,7 +260,7 @@ def queue_status() -> dict[str, Any]:
 
 @app.post("/api/queue/{job_id}/priority")
 def queue_priority(job_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-    return queue_store.set_priority(job_id, int(payload.get("priority") or 100))
+    return queue_store.set_priority(job_id, int(payload.get("priority") or 1))
 
 
 @app.post("/api/queue/{job_id}/move")
@@ -324,9 +324,9 @@ def mcp_tools(x_mcp_token: str | None = Header(default=None)) -> dict[str, Any]:
         "endpoint": "/mcp",
         "methods": {
             "queue.status": {},
-            "queue.set_priority": {"job_id": "HJO-...", "priority": 2},
-            "queue.move": {"job_id": "HJO-...", "direction": "up|down"},
-            "queue.reorder": {"job_ids": ["HJO-1", "HJO-2"]},
+            "queue.set_priority": {"job_id": "HJO-... or J-...", "priority": 2},
+            "queue.move": {"job_id": "HJO-... or J-...", "direction": "up|down"},
+            "queue.reorder": {"job_ids": ["HJO-1", "J-2"]},
             "queue.submit": {"source": "hermes", "jobs": []},
         },
     }
@@ -340,7 +340,7 @@ def mcp(payload: dict[str, Any] = Body(default_factory=dict), x_mcp_token: str |
     if method == "queue.status":
         result = queue_store.get_queue_state()
     elif method == "queue.set_priority":
-        result = queue_store.set_priority(str(params.get("job_id")), int(params.get("priority") or 100))
+        result = queue_store.set_priority(str(params.get("job_id")), int(params.get("priority") or 1))
     elif method == "queue.move":
         result = queue_store.move(str(params.get("job_id")), str(params.get("direction") or "up"))
     elif method == "queue.reorder":
