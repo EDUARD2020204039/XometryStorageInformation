@@ -4,16 +4,23 @@ from typing import Any
 from pathlib import PureWindowsPath
 from urllib.parse import quote
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Body, Header
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .agents import process_jobs
+from .bend_artifacts import artifact_path, read_bend_summary
 from .geo_files import read_remote_geo_file
 from .store import find_job_by_offer_id, list_jobs, read_events
+from . import queue_store, settings
 
 
 app = FastAPI(title="Xometry Analiza Agents", version="2.0.0")
+
+
+@app.on_event("startup")
+def start_queue_worker() -> None:
+    queue_store.recover_and_start()
 
 
 class AgentJobsPayload(BaseModel):
@@ -32,8 +39,8 @@ def health() -> dict[str, Any]:
 
 @app.post("/api/agents/jobs")
 def submit_jobs(payload: AgentJobsPayload, background_tasks: BackgroundTasks) -> dict[str, Any]:
-    background_tasks.add_task(_run_jobs, payload)
-    return {"ok": True, "queued": len(payload.jobs), "source": payload.source}
+    result = queue_store.enqueue_jobs(payload.jobs, payload.source)
+    return {"ok": True, "queued": result["queued"], "added": result["added"], "skipped": result["skipped"], "source": payload.source}
 
 
 @app.get("/api/agents/logs")
@@ -44,6 +51,125 @@ def logs(limit: int = 50) -> dict[str, Any]:
 @app.get("/api/agents/jobs")
 def jobs(limit: int = 100) -> dict[str, Any]:
     return {"items": list_jobs(limit)}
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard() -> HTMLResponse:
+    return HTMLResponse("""<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>XometryAnaliza Queue</title>
+  <style>
+    body{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}
+    header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 20px;background:#111827;color:white}
+    h1{margin:0;font-size:20px} .sub{color:#cbd5e1;font-size:12px;margin-top:3px}
+    main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px}
+    section{background:white;border:1px solid #d9e2ec;border-radius:8px;overflow:hidden}
+    h2{margin:0;padding:12px 14px;border-bottom:1px solid #e5eaf0;font-size:15px;background:#f8fafc}
+    .panel{padding:12px 14px}.active{border-left:5px solid #1677ff}.idle{border-left:5px solid #94a3b8}
+    .job{display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px;border-bottom:1px solid #eef2f7}
+    .job:last-child{border-bottom:0}.id{font-weight:700}.meta{font-size:12px;color:#52606d;margin-top:4px}
+    .pill{display:inline-flex;align-items:center;min-height:22px;padding:0 8px;border-radius:999px;background:#e6f4ff;color:#0958d9;font-size:12px;font-weight:700}
+    button,input{height:30px;border:1px solid #cbd5e1;border-radius:4px;background:white;font-weight:700}
+    button{cursor:pointer;padding:0 9px} input{width:62px;padding:0 6px}
+    .actions{display:flex;align-items:center;gap:6px}.log{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap}
+    @media(max-width:900px){main{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <header><div><h1>XometryAnaliza</h1><div class="sub">queue, agents, GEO, bend status</div></div><div id="summary"></div></header>
+  <main>
+    <div>
+      <section id="active"></section>
+      <section style="margin-top:16px"><h2>Logs</h2><div id="logs" class="panel log"></div></section>
+    </div>
+    <section><h2>Urmatoarele joburi</h2><div id="queue"></div></section>
+  </main>
+  <script>
+    const api = async (url, options={}) => (await fetch(url,{headers:{'Content-Type':'application/json'},...options})).json();
+    async function move(id, direction){ await api('/api/queue/'+encodeURIComponent(id)+'/move',{method:'POST',body:JSON.stringify({direction})}); refresh(); }
+    async function priority(id, el){ await api('/api/queue/'+encodeURIComponent(id)+'/priority',{method:'POST',body:JSON.stringify({priority:Number(el.value||100)})}); refresh(); }
+    function jobHtml(item, i){
+      const title = item.title || item.job_id;
+      return `<div class="job"><div><div class="id">${i+1}. ${item.job_id}</div><div class="meta">${title}</div><div class="meta">${item.offer_id||''} ${item.source||''}</div></div><div class="actions"><input value="${item.priority||0}" onchange="priority('${item.job_id}',this)"><button onclick="move('${item.job_id}','up')">Up</button><button onclick="move('${item.job_id}','down')">Down</button></div></div>`;
+    }
+    async function refresh(){
+      const data = await api('/api/queue');
+      document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'lucreaza':'idle'}</span> <span class="pill">${data.queued_count} in coada</span>`;
+      const active = data.active;
+      document.getElementById('active').innerHTML = `<h2>Job activ</h2><div class="panel ${active?'active':'idle'}">${active?`<div class="id">${active.job_id}</div><div class="meta">${active.title||''}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>`:'Nu lucreaza acum.'}</div>`;
+      document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi in asteptare.</div>';
+      const logs = await api('/api/agents/logs?limit=20');
+      document.getElementById('logs').textContent = (logs.items||[]).reverse().map(x => `${new Date((x.ts||0)*1000).toLocaleTimeString()} ${x.type}: ${x.message}`).join('\\n');
+    }
+    refresh(); setInterval(refresh, 5000);
+  </script>
+</body>
+</html>""")
+
+
+@app.get("/api/queue")
+def queue_status() -> dict[str, Any]:
+    return queue_store.get_queue_state()
+
+
+@app.post("/api/queue/{job_id}/priority")
+def queue_priority(job_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    return queue_store.set_priority(job_id, int(payload.get("priority") or 100))
+
+
+@app.post("/api/queue/{job_id}/move")
+def queue_move(job_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    return queue_store.move(job_id, str(payload.get("direction") or "up"))
+
+
+@app.post("/api/queue/reorder")
+def queue_reorder(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    return queue_store.reorder([str(item) for item in payload.get("job_ids") or []])
+
+
+def _check_mcp_token(x_mcp_token: str | None) -> None:
+    token = getattr(settings, "MCP_TOKEN", "")
+    if token and x_mcp_token != token:
+        raise HTTPException(status_code=401, detail="Invalid MCP token")
+
+
+@app.get("/mcp/tools")
+def mcp_tools(x_mcp_token: str | None = Header(default=None)) -> dict[str, Any]:
+    _check_mcp_token(x_mcp_token)
+    return {
+        "server": "xometryanaliza",
+        "endpoint": "/mcp",
+        "methods": {
+            "queue.status": {},
+            "queue.set_priority": {"job_id": "HJO-...", "priority": 500},
+            "queue.move": {"job_id": "HJO-...", "direction": "up|down"},
+            "queue.reorder": {"job_ids": ["HJO-1", "HJO-2"]},
+            "queue.submit": {"source": "hermes", "jobs": []},
+        },
+    }
+
+
+@app.post("/mcp")
+def mcp(payload: dict[str, Any] = Body(default_factory=dict), x_mcp_token: str | None = Header(default=None)) -> dict[str, Any]:
+    _check_mcp_token(x_mcp_token)
+    method = payload.get("method")
+    params = payload.get("params") or {}
+    if method == "queue.status":
+        result = queue_store.get_queue_state()
+    elif method == "queue.set_priority":
+        result = queue_store.set_priority(str(params.get("job_id")), int(params.get("priority") or 100))
+    elif method == "queue.move":
+        result = queue_store.move(str(params.get("job_id")), str(params.get("direction") or "up"))
+    elif method == "queue.reorder":
+        result = queue_store.reorder([str(item) for item in params.get("job_ids") or []])
+    elif method == "queue.submit":
+        result = queue_store.enqueue_jobs(params.get("jobs") or [], params.get("source") or "hermes")
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown MCP method: {method}")
+    return {"jsonrpc": "2.0", "id": payload.get("id"), "result": result}
 
 
 @app.get("/api/agents/geo/{offer_id}")
@@ -58,8 +184,27 @@ def geo_status(offer_id: str) -> dict[str, Any]:
         "job_id": state.get("job_id"),
         "status": sheet.get("status") or "no_sheet_agent",
         "geo_items": sheet.get("geo_items") or [],
+        "bend_report": sheet.get("bend_report") or read_bend_summary(offer_id),
         "state": state,
     }
+
+
+@app.get("/api/agents/bend/{offer_id}")
+def bend_status(offer_id: str) -> dict[str, Any]:
+    summary = read_bend_summary(offer_id)
+    if not summary:
+        return {"ok": False, "offer_id": offer_id, "status": "not_found", "has_bend_issues": None, "artifacts": []}
+    return {"ok": True, **summary}
+
+
+@app.get("/api/agents/bend/{offer_id}/artifacts/{filename}")
+def bend_artifact(offer_id: str, filename: str) -> Response:
+    try:
+        path = artifact_path(offer_id, filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Artifact not found") from exc
+    media_type = "text/html; charset=utf-8" if path.suffix.lower() == ".html" else "application/json"
+    return Response(path.read_bytes(), media_type=media_type)
 
 
 @app.get("/api/agents/geo/{offer_id}/view")

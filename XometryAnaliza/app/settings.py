@@ -29,6 +29,7 @@ TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("1", "true"
 TELEGRAM_SHEET_START_LOGS = os.getenv("TELEGRAM_SHEET_START_LOGS", "false").lower() in ("1", "true", "yes")
 TELEGRAM_SHEET_FAILURE_LOGS = os.getenv("TELEGRAM_SHEET_FAILURE_LOGS", "false").lower() in ("1", "true", "yes")
 TELEGRAM_GEO_LOGS = os.getenv("TELEGRAM_GEO_LOGS", "true").lower() in ("1", "true", "yes")
+MCP_TOKEN = os.getenv("MCP_TOKEN", "")
 
 
 def ensure_dirs() -> None:

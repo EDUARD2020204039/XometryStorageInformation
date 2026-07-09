@@ -143,6 +143,33 @@ def _copy_agent_geo(offer_id: str, paths: dict[str, Path], copied: list[str], wa
             warnings.append(f"Nu am putut copia GEO #{index + 1}: {type(exc).__name__}: {exc}")
 
 
+def _copy_bend_artifacts(offer_id: str, paths: dict[str, Path], copied: list[str], warnings: list[str]) -> None:
+    agent_url = (os.getenv("XOMETRY_AGENT_URL") or os.getenv("AGENT_URL") or "http://192.168.2.23:4468").rstrip("/")
+    try:
+        response = requests.get(f"{agent_url}/api/agents/bend/{quote(str(offer_id), safe='')}", timeout=10)
+        if response.status_code == 404:
+            return
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        warnings.append(f"Nu am putut citi raportul de indoire: {type(exc).__name__}: {exc}")
+        return
+
+    for artifact in payload.get("artifacts") or []:
+        url = artifact.get("url")
+        name = artifact.get("name") or "bend_report.html"
+        if not url:
+            continue
+        try:
+            file_response = requests.get(f"{agent_url}{url}", timeout=20)
+            file_response.raise_for_status()
+            dest = _unique_path(paths["INDOIRE"] / _safe_name(str(name)))
+            dest.write_bytes(file_response.content)
+            copied.append(str(dest))
+        except Exception as exc:
+            warnings.append(f"Nu am putut copia artifact indoire {name}: {type(exc).__name__}: {exc}")
+
+
 def create_xometry_workspace(folder_name: str, offer_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     root = Path(os.getenv("DOSAR_ROOT_PATH", "/mnt/xLucru"))
     folder = root / _safe_name(folder_name)
@@ -157,6 +184,7 @@ def create_xometry_workspace(folder_name: str, offer_id: str, metadata: dict[str
 
     _copy_local_docs(offer_id, paths, copied)
     _copy_agent_geo(offer_id, paths, copied, warnings)
+    _copy_bend_artifacts(offer_id, paths, copied, warnings)
 
     status_lines = [
         f"Dosar: {folder_name}",

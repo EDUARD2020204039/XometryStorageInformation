@@ -22,10 +22,12 @@ services:
       TELEGRAM_SHEET_START_LOGS: "false"
       TELEGRAM_SHEET_FAILURE_LOGS: "false"
       TELEGRAM_GEO_LOGS: "false"
+      MCP_TOKEN: "${XOMETRY_ANALIZA_MCP_TOKEN:-}"
     ports:
       - "4468:4468"
     volumes:
       - xometryanaliza_data:/app/data
+      - /mnt/xLucru:/mnt/xLucru
 
   xometry-app:
     image: ghcr.io/unraidg5/xometrystorageinformation:latest

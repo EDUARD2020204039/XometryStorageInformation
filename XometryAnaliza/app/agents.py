@@ -8,6 +8,7 @@ from .ofertare_client import extract_geo_items, run_ofertare_automata
 from .store import append_event, load_job_state, save_job_state
 from .telegram_log import send_log
 from .xometry_backend_client import lookup_dosar_references
+from .bend_artifacts import build_bend_artifacts, copy_bend_artifacts_to_dosar
 
 SHEET_KEYWORDS = (
     "sheet",
@@ -189,12 +190,14 @@ class SheetMetalLaserAgent:
         try:
             result = run_ofertare_automata(job)
             geo_items = _filter_geo_items_for_sheet_parts(job, extract_geo_items(result))
+            bend_report = build_bend_artifacts(job_id, offer_id, result, geo_items) if offer_id else None
             status = "geo_ready" if any(item.get("geo_exists") for item in geo_items) else "geo_requested"
             output = {
                 "agent": self.name,
                 "status": status,
                 "ofertare_result": result,
                 "geo_items": geo_items,
+                "bend_report": bend_report,
                 "matched_sheet_part_ids": sorted(_sheet_part_ids(job)),
                 "completed_ts": time.time(),
             }
@@ -248,6 +251,13 @@ def process_job(job: dict[str, Any]) -> dict[str, Any]:
         results["cnc"] = CncAgent().run(job)
     if "sheet_metal_laser" in agents:
         results["sheet_metal_laser"] = SheetMetalLaserAgent().run(job)
+        bend_report = (results["sheet_metal_laser"] or {}).get("bend_report") or {}
+        current_dosar = (state.get("dosar_lookup") or {}).get("current") or {}
+        if bend_report and current_dosar.get("has_dosar") and current_dosar.get("dosar_path"):
+            try:
+                bend_report["dosar_copy"] = copy_bend_artifacts_to_dosar(str(job.get("offer_id") or ""), current_dosar["dosar_path"])
+            except Exception as exc:
+                bend_report["dosar_copy"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     state.update(results)
     save_job_state(job_id, state)

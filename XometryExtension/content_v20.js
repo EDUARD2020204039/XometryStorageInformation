@@ -1,4 +1,4 @@
-// Xometry Price Calculator Extension (v2.64)
+// Xometry Price Calculator Extension (v2.65)
 // Content Script v20 - Thickness Normalization
 
 (function () {
@@ -14,7 +14,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.64 Loaded (content_v20.js)");
+    log("Extension v2.65 Loaded (content_v20.js)");
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -60,7 +60,7 @@
             // Header with Minimize
             const header = `
                 <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.64</span></span>
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.65</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -597,6 +597,12 @@
         return `${agentSource.replace(/\/$/, '')}/api/agents/geo/${encodeURIComponent(offerId)}/view`;
     }
 
+    function bendReportUrl(agentSource, bendReport) {
+        const artifact = (bendReport?.artifacts || []).find(item => item.type === 'bend_report') || (bendReport?.artifacts || [])[0];
+        if (!artifact?.url || !agentSource) return '';
+        return `${agentSource.replace(/\/$/, '')}${artifact.url}`;
+    }
+
     function findJobTitleElement() {
         const headings = Array.from(document.querySelectorAll('h1, h2'));
         return headings.find(heading => /\bJob\s+(HJO-|J-|RFQ-)/i.test(heading.textContent || '')) || headings[0] || null;
@@ -837,6 +843,23 @@
         link.textContent = `GEO: ${fileName}`;
         link.title = targetPath;
         row.appendChild(link);
+
+        const bend = geoStatus?.bend_report;
+        if (bend) {
+            const bendLink = document.createElement('a');
+            bendLink.className = bend.has_bend_issues ? 'xom-bend-status issue' : 'xom-bend-status ok';
+            bendLink.textContent = bend.has_bend_issues ? 'Indoire: probleme' : 'Indoire: fara probleme';
+            bendLink.title = bend.status || bendLink.textContent;
+            const reportUrl = bendReportUrl(agentSource, bend);
+            if (reportUrl) {
+                bendLink.href = reportUrl;
+                bendLink.target = '_blank';
+                bendLink.rel = 'noreferrer';
+            } else {
+                bendLink.href = url;
+            }
+            row.appendChild(bendLink);
+        }
     }
 
     function showAllGeoLinks(geoStatus, agentSource, offerId) {

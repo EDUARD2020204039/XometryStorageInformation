@@ -24,6 +24,7 @@ class DosarService:
         self.odoo_required = os.getenv("ODOO_DOSAR_REQUIRED", "false").lower() in ("1", "true", "yes")
 
     def get_latest_dosar_id(self) -> int | None:
+        candidates: list[int] = []
         try:
             response = requests.get(
                 f"{self.api_url}/getLatestDosar/",
@@ -34,19 +35,40 @@ class DosarService:
             data = response.json()
             dosar_id = int(data.get("DosarID", 0))
             logger.info("Latest dosar ID: %s", dosar_id)
-            return dosar_id
+            candidates.append(dosar_id)
         except Exception as e:
             logger.error("Could not read latest dosar ID: %s", e)
-            try:
-                client = OdooClient()
-                if client.configured:
-                    dosar_id = client.get_latest_dosar_id()
-                    if dosar_id:
-                        logger.info("Latest Odoo dosar ID fallback: %s", dosar_id)
-                        return dosar_id
-            except Exception as odoo_error:
-                logger.error("Could not read latest Odoo dosar ID: %s", odoo_error)
+
+        try:
+            client = OdooClient()
+            if client.configured:
+                dosar_id = client.get_latest_dosar_id()
+                if dosar_id:
+                    logger.info("Latest Odoo dosar ID: %s", dosar_id)
+                    candidates.append(dosar_id)
+        except Exception as odoo_error:
+            logger.error("Could not read latest Odoo dosar ID: %s", odoo_error)
+
+        local_id = self.get_latest_local_folder_id()
+        if local_id:
+            candidates.append(local_id)
+
+        return max(candidates) if candidates else None
+
+    def get_latest_local_folder_id(self) -> int | None:
+        root_path = Path(os.getenv("DOSAR_ROOT_PATH", "/mnt/xLucru"))
+        if not root_path.exists():
             return None
+        latest: int | None = None
+        for item in root_path.iterdir():
+            if not item.is_dir():
+                continue
+            match = __import__("re").match(r"^(\d+)(?:_|$)", item.name)
+            if not match:
+                continue
+            number = int(match.group(1))
+            latest = number if latest is None else max(latest, number)
+        return latest
 
     def preview_next_dosar(self) -> dict[str, Any]:
         latest_id = self.get_latest_dosar_id()

@@ -323,3 +323,28 @@
   background: #fffbe6;
   color: #ad6800;
 }
+
+.xom-bend-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  margin-left: 6px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  text-decoration: none;
+}
+
+.xom-bend-status.ok {
+  border: 1px solid #b7eb8f;
+  background: #f6ffed;
+  color: #237804;
+}
+
+.xom-bend-status.issue {
+  border: 1px solid #ffa39e;
+  background: #fff1f0;
+  color: #cf1322;
+}
