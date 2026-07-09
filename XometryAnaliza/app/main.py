@@ -130,6 +130,43 @@ def queue_reorder(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[
     return queue_store.reorder([str(item) for item in payload.get("job_ids") or []])
 
 
+def _bend_summary_from_geo_items(offer_id: str, job_id: str | None, geo_items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not geo_items:
+        return None
+    issues = []
+    warnings = []
+    for item in geo_items:
+        status = str(item.get("status") or "").lower()
+        classification = str(item.get("classification") or "").lower()
+        reason = str(item.get("reason") or item.get("message") or "")
+        is_issue = False
+        if status and status not in ("ok", "success", "geo_ready", "done", "cached"):
+            is_issue = True
+        if item.get("bendable") is False:
+            is_issue = True
+        if classification and classification not in ("ok", "success", "bendable", "ready"):
+            is_issue = True
+        if reason and any(token in reason.lower() for token in ("eroare", "failed", "nu accepta", "problem", "unsupported")):
+            is_issue = True
+        if is_issue:
+            issues.append(item)
+        elif reason:
+            warnings.append(reason)
+
+    has_issues = bool(issues)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "offer_id": offer_id,
+        "has_bend_issues": has_issues,
+        "status": "probleme la indoire" if has_issues else "fara probleme la indoire",
+        "issue_count": len(issues),
+        "warning_count": len(warnings),
+        "source": "geo_items",
+        "artifacts": [],
+    }
+
+
 def _check_mcp_token(x_mcp_token: str | None) -> None:
     token = getattr(settings, "MCP_TOKEN", "")
     if token and x_mcp_token != token:
@@ -178,13 +215,19 @@ def geo_status(offer_id: str) -> dict[str, Any]:
     if not state:
         return {"ok": False, "offer_id": offer_id, "status": "not_found", "geo_items": []}
     sheet = state.get("sheet_metal_laser") or {}
+    geo_items = sheet.get("geo_items") or []
+    bend_report = sheet.get("bend_report") or read_bend_summary(offer_id) or _bend_summary_from_geo_items(
+        offer_id,
+        state.get("job_id"),
+        geo_items,
+    )
     return {
         "ok": True,
         "offer_id": offer_id,
         "job_id": state.get("job_id"),
         "status": sheet.get("status") or "no_sheet_agent",
-        "geo_items": sheet.get("geo_items") or [],
-        "bend_report": sheet.get("bend_report") or read_bend_summary(offer_id),
+        "geo_items": geo_items,
+        "bend_report": bend_report,
         "state": state,
     }
 
@@ -192,6 +235,10 @@ def geo_status(offer_id: str) -> dict[str, Any]:
 @app.get("/api/agents/bend/{offer_id}")
 def bend_status(offer_id: str) -> dict[str, Any]:
     summary = read_bend_summary(offer_id)
+    if not summary:
+        state = find_job_by_offer_id(offer_id)
+        sheet = (state or {}).get("sheet_metal_laser") or {}
+        summary = _bend_summary_from_geo_items(offer_id, (state or {}).get("job_id"), sheet.get("geo_items") or [])
     if not summary:
         return {"ok": False, "offer_id": offer_id, "status": "not_found", "has_bend_issues": None, "artifacts": []}
     return {"ok": True, **summary}
