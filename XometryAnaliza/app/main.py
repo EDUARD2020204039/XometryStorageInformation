@@ -28,8 +28,90 @@ class AgentJobsPayload(BaseModel):
     source: str = "unknown"
 
 
+class ManualJobPayload(BaseModel):
+    identifier: str = ""
+    job_id: str = ""
+    offer_id: str = ""
+    url: str = ""
+    source: str = "manual"
+    force: bool = True
+    front: bool = True
+
+
 def _run_jobs(payload: AgentJobsPayload) -> None:
     process_jobs(payload.jobs)
+
+
+JOB_ID_RE = re.compile(r"\b(?:HJO|J|RFQ)-\d+(?:-\d+)?\b", re.IGNORECASE)
+OFFER_URL_RE = re.compile(r"/offers/(\d+)", re.IGNORECASE)
+
+
+def _xometry_offer_url(offer_id: str = "", job_id: str = "") -> str:
+    value = str(offer_id or job_id or "").strip()
+    if not value:
+        return ""
+    if str(job_id or "").upper().startswith("RFQ-"):
+        return f"https://partner.xometry.eu/rfqs/{quote(str(job_id), safe='')}"
+    suffix = "?gsh=true&source=jobs&locale=en" if str(job_id or "").upper().startswith(("HJO-", "J-")) else "?source=jobs&locale=en"
+    return f"https://partner.xometry.eu/offers/{quote(value, safe='')}{suffix}"
+
+
+def _find_known_job(job_id: str = "", offer_id: str = "") -> dict[str, Any] | None:
+    job_id_norm = str(job_id or "").strip().lower()
+    offer_id_norm = str(offer_id or "").strip()
+    for state in list_jobs(1000):
+        job = state.get("job") or {}
+        current_job_id = str(state.get("job_id") or job.get("id") or job.get("job_id") or "").strip()
+        current_offer_id = str(state.get("offer_id") or job.get("offer_id") or "").strip()
+        if job_id_norm and current_job_id.lower() == job_id_norm:
+            return {**job, "id": current_job_id, "offer_id": current_offer_id or job.get("offer_id")}
+        if offer_id_norm and current_offer_id == offer_id_norm:
+            return {**job, "id": current_job_id or job.get("id"), "offer_id": current_offer_id}
+    return None
+
+
+def _manual_job_from_payload(payload: ManualJobPayload) -> dict[str, Any]:
+    identifier = str(payload.identifier or "").strip()
+    url = str(payload.url or "").strip()
+    offer_id = str(payload.offer_id or "").strip()
+    job_id = str(payload.job_id or "").strip()
+
+    source_text = " ".join(value for value in (identifier, url, offer_id, job_id) if value)
+    if not url and identifier.lower().startswith(("http://", "https://")):
+        url = identifier
+    offer_match = OFFER_URL_RE.search(url or identifier)
+    if offer_match and not offer_id:
+        offer_id = offer_match.group(1)
+    job_match = JOB_ID_RE.search(source_text)
+    if job_match and not job_id:
+        job_id = job_match.group(0).upper()
+    if not offer_id and identifier.isdigit():
+        offer_id = identifier
+
+    known = _find_known_job(job_id=job_id, offer_id=offer_id) or {}
+    if not job_id:
+        job_id = str(known.get("id") or known.get("job_id") or offer_id or "manual")
+    if not offer_id:
+        offer_id = str(known.get("offer_id") or "")
+    if not url:
+        url = str(known.get("link") or known.get("url") or _xometry_offer_url(offer_id, job_id))
+
+    job = {
+        **known,
+        "id": job_id,
+        "job_id": job_id,
+        "offer_id": offer_id,
+        "title": known.get("title") or known.get("job_name") or job_id,
+        "job_name": known.get("job_name") or job_id,
+        "link": url,
+        "url": url,
+        "process": known.get("process") or "sheet metal, laser cutting, bending",
+        "raw_text": f"{known.get('raw_text') or ''} manual sheet metal laser cutting bending".strip(),
+        "manual": True,
+    }
+    if not job.get("parts"):
+        job["parts"] = [{"process": "Sheet", "processType": "Laser Cutting", "part_id": job_id}]
+    return job
 
 
 @app.get("/health")
@@ -41,6 +123,15 @@ def health() -> dict[str, Any]:
 def submit_jobs(payload: AgentJobsPayload, background_tasks: BackgroundTasks) -> dict[str, Any]:
     result = queue_store.enqueue_jobs(payload.jobs, payload.source)
     return {"ok": True, "queued": result["queued"], "added": result["added"], "skipped": result["skipped"], "source": payload.source}
+
+
+@app.post("/api/queue/manual")
+def submit_manual_job(payload: ManualJobPayload) -> dict[str, Any]:
+    job = _manual_job_from_payload(payload)
+    if not (job.get("link") or job.get("url")):
+        raise HTTPException(status_code=400, detail="Nu pot construi URL Xometry pentru acest job.")
+    result = queue_store.enqueue_jobs([job], payload.source or "manual", force=payload.force, front=payload.front)
+    return {"ok": True, "job": job, "result": result}
 
 
 @app.get("/api/agents/logs")
@@ -200,6 +291,8 @@ def dashboard() -> HTMLResponse:
     button,input{height:30px;border:1px solid #cbd5e1;border-radius:4px;background:white;font-weight:700}
     button{cursor:pointer;padding:0 9px} input{width:62px;padding:0 6px}
     .actions{display:flex;align-items:center;gap:6px}.log{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap}
+    .manual{display:flex;gap:8px;align-items:center}.manual input{width:100%;min-width:0}.manual button{white-space:nowrap;background:#1677ff;color:white;border-color:#1677ff}
+    .hint{margin-top:8px;font-size:12px;color:#52606d}.result{margin-top:8px;font-size:12px;font-weight:700}.ok{color:#166534}.bad{color:#991b1b}
     @media(max-width:900px){main{grid-template-columns:1fr}}
   </style>
 </head>
@@ -207,7 +300,18 @@ def dashboard() -> HTMLResponse:
   <header><div><h1>XometryAnaliza</h1><div class="sub">TecZone laptop queue, GEO, bend status</div></div><div class="top"><a class="toplink" href="/api/agents/history/view" target="_blank" rel="noreferrer">Istoric</a><div id="summary"></div></div></header>
   <main>
     <div>
-      <section id="active"></section>
+      <section>
+        <h2>Trimite job manual</h2>
+        <div class="panel">
+          <form class="manual" onsubmit="submitManual(event)">
+            <input id="manualJob" placeholder="URL, offer id, HJO-... sau J-..." autocomplete="off">
+            <button type="submit">Trimite job</button>
+          </form>
+          <div class="hint">Il pune primul in coada si forteaza refacerea daca a mai fost vazut.</div>
+          <div id="manualResult" class="result"></div>
+        </div>
+      </section>
+      <section id="active" style="margin-top:16px"></section>
       <section style="margin-top:16px"><h2>Logs</h2><div id="logs" class="panel log"></div></section>
     </div>
     <section><h2>Urmatoarele pentru laptop</h2><div id="queue"></div></section>
@@ -229,6 +333,27 @@ def dashboard() -> HTMLResponse:
     }
     async function move(id, direction){ await api('/api/queue/'+encodeURIComponent(id)+'/move',{method:'POST',body:JSON.stringify({direction})}); refresh(); }
     async function position(id, el){ await api('/api/queue/'+encodeURIComponent(id)+'/priority',{method:'POST',body:JSON.stringify({priority:Number(el.value||1)})}); refresh(); }
+    async function submitManual(event){
+      event.preventDefault();
+      const input = document.getElementById('manualJob');
+      const result = document.getElementById('manualResult');
+      const value = input.value.trim();
+      if (!value) return;
+      result.className = 'result';
+      result.textContent = 'Trimit...';
+      try {
+        const data = await api('/api/queue/manual',{method:'POST',body:JSON.stringify({identifier:value,force:true,front:true})});
+        const added = data?.result?.added || 0;
+        const skippedActive = data?.result?.skipped_active || 0;
+        result.className = 'result ' + (added ? 'ok' : 'bad');
+        result.textContent = added ? `Adaugat primul in coada: ${data.job?.id || value}` : (skippedActive ? 'Jobul este deja activ pe laptop.' : 'Nu a fost adaugat. Verifica daca este sheet/laser sau URL valid.');
+        if (added) input.value = '';
+        refresh();
+      } catch (err) {
+        result.className = 'result bad';
+        result.textContent = 'Eroare la trimitere.';
+      }
+    }
     function jobHtml(item, i){
       const title = esc(item.title || item.job_id);
       const id = esc(item.job_id);
@@ -329,6 +454,7 @@ def mcp_tools(x_mcp_token: str | None = Header(default=None)) -> dict[str, Any]:
             "queue.move": {"job_id": "HJO-... or J-...", "direction": "up|down"},
             "queue.reorder": {"job_ids": ["HJO-1", "J-2"]},
             "queue.submit": {"source": "hermes", "jobs": []},
+            "queue.submit_manual": {"identifier": "URL, offer id, HJO-... or J-...", "force": True, "front": True},
         },
     }
 
@@ -348,6 +474,18 @@ def mcp(payload: dict[str, Any] = Body(default_factory=dict), x_mcp_token: str |
         result = queue_store.reorder([str(item) for item in params.get("job_ids") or []])
     elif method == "queue.submit":
         result = queue_store.enqueue_jobs(params.get("jobs") or [], params.get("source") or "hermes")
+    elif method == "queue.submit_manual":
+        manual = ManualJobPayload(
+            identifier=str(params.get("identifier") or ""),
+            job_id=str(params.get("job_id") or ""),
+            offer_id=str(params.get("offer_id") or ""),
+            url=str(params.get("url") or ""),
+            source=str(params.get("source") or "hermes"),
+            force=bool(params.get("force", True)),
+            front=bool(params.get("front", True)),
+        )
+        job = _manual_job_from_payload(manual)
+        result = {"job": job, **queue_store.enqueue_jobs([job], manual.source, force=manual.force, front=manual.front)}
     else:
         raise HTTPException(status_code=400, detail=f"Unknown MCP method: {method}")
     return {"jsonrpc": "2.0", "id": payload.get("id"), "result": result}

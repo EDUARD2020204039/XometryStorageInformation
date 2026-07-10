@@ -113,6 +113,9 @@ def _ofertare_failure_reason(result: dict[str, Any]) -> str:
 
 class RouterAgent:
     def route(self, job: dict[str, Any]) -> list[str]:
+        if job.get("manual"):
+            return ["sheet_metal_laser"]
+
         text = _text(job)
         agents = []
         parts = [part for part in job.get("parts") or [] if isinstance(part, dict)]

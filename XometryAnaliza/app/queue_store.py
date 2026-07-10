@@ -79,6 +79,9 @@ def _part_process_text(part: dict[str, Any]) -> str:
 
 
 def _is_sheet_laser_job(job: dict[str, Any]) -> bool:
+    if job.get("manual"):
+        return True
+
     parts = [part for part in job.get("parts") or [] if isinstance(part, dict)]
     if parts:
         return any(
@@ -110,13 +113,14 @@ def _has_recent_attempt(job_id: str) -> bool:
     return bool(completed_ts and time.time() - completed_ts < settings.SHEET_AGENT_RETRY_SECONDS)
 
 
-def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[str, Any]:
+def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown", force: bool = False, front: bool = False) -> dict[str, Any]:
     now = time.time()
     added = 0
     skipped = 0
     skipped_non_sheet = 0
     skipped_cached = 0
     skipped_recent = 0
+    skipped_active = 0
     with _LOCK:
         data = _read()
         known = {item["job_id"] for item in data.get("queued") or []}
@@ -134,23 +138,34 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
         for job in jobs:
             job_id = _job_id(job)
             offer_id = _offer_id(job)
+            active_job_id = str(active.get("job_id") or "")
+            active_offer_id = str(active.get("offer_id") or "")
+            if active and (job_id == active_job_id or (offer_id and offer_id == active_offer_id)):
+                skipped += 1
+                skipped_active += 1
+                continue
             if not _is_sheet_laser_job(job):
                 skipped += 1
                 skipped_non_sheet += 1
                 continue
-            if _has_ready_geo(job_id):
+            if not force and _has_ready_geo(job_id):
                 skipped += 1
                 skipped_cached += 1
                 continue
-            if _has_recent_attempt(job_id):
+            if not force and _has_recent_attempt(job_id):
                 skipped += 1
                 skipped_recent += 1
                 continue
-            if job_id in known or (offer_id and offer_id in known_offers):
+            if force:
+                data["queued"] = [
+                    item for item in data.get("queued") or []
+                    if item.get("job_id") != job_id and (not offer_id or str(item.get("offer_id") or "") != offer_id)
+                ]
+            elif job_id in known or (offer_id and offer_id in known_offers):
                 skipped += 1
                 continue
             priority = len(data.get("queued") or []) + added + 1
-            data["queued"].append({
+            item = {
                 "job_id": job_id,
                 "safe_id": safe_id(job_id),
                 "offer_id": job.get("offer_id"),
@@ -161,7 +176,12 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
                 "status": "queued",
                 "queued_ts": now,
                 "job": job,
-            })
+                "force": force,
+            }
+            if front:
+                data["queued"].insert(added, item)
+            else:
+                data["queued"].append(item)
             known.add(job_id)
             if offer_id:
                 known_offers.add(offer_id)
@@ -187,6 +207,9 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
             skipped_non_sheet=skipped_non_sheet,
             skipped_cached=skipped_cached,
             skipped_recent=skipped_recent,
+            skipped_active=skipped_active,
+            force=force,
+            front=front,
         )
         ensure_worker()
     return {
@@ -196,6 +219,9 @@ def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown") -> dict[st
         "skipped_non_sheet": skipped_non_sheet,
         "skipped_cached": skipped_cached,
         "skipped_recent": skipped_recent,
+        "skipped_active": skipped_active,
+        "force": force,
+        "front": front,
         "queued": len(data.get("queued") or []),
     }
 
@@ -223,9 +249,10 @@ def _dedupe_queue(data: dict[str, Any]) -> None:
     for item in data.get("queued") or []:
         job_id = item.get("job_id")
         offer_id = str(item.get("offer_id") or "")
-        if not job_id or job_id in seen or job_id in completed_ids:
+        forced = bool(item.get("force"))
+        if not job_id or job_id in seen or (not forced and job_id in completed_ids):
             continue
-        if offer_id and (offer_id in seen_offers or offer_id in completed_offers):
+        if offer_id and (offer_id in seen_offers or (not forced and offer_id in completed_offers)):
             continue
         seen.add(job_id)
         if offer_id:
