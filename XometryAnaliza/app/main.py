@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from .agents import process_jobs
 from .bend_artifacts import artifact_path, read_bend_summary
 from .geo_files import read_remote_geo_file
+from .metrics import observability_summary, prometheus_metrics
 from .store import find_job_by_offer_id, list_jobs, read_events
 from . import queue_store, settings
 
@@ -117,6 +118,24 @@ def _manual_job_from_payload(payload: ManualJobPayload) -> dict[str, Any]:
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "service": "xometry-analiza-agents"}
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(
+        prometheus_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+@app.get("/api/observability/summary")
+def observability_summary_api(limit: int = 10000) -> dict[str, Any]:
+    return observability_summary(job_limit=limit)
+
+
+@app.get("/api/observability/jobs")
+def observability_jobs_api(limit: int = 200) -> dict[str, Any]:
+    return {"items": observability_summary(job_limit=limit)["jobs"]["recent"][:limit]}
 
 
 @app.post("/api/agents/jobs")
@@ -297,7 +316,7 @@ def dashboard() -> HTMLResponse:
   </style>
 </head>
 <body>
-  <header><div><h1>XometryAnaliza</h1><div class="sub">TecZone laptop queue, GEO, bend status</div></div><div class="top"><a class="toplink" href="/api/agents/history/view" target="_blank" rel="noreferrer">Istoric</a><div id="summary"></div></div></header>
+  <header><div><h1>XometryAnaliza</h1><div class="sub">TecZone laptop queue, GEO, bend status</div></div><div class="top"><a class="toplink" href="/api/agents/history/view" target="_blank" rel="noreferrer">Istoric</a><a class="toplink" href="/metrics" target="_blank" rel="noreferrer">Metrics</a><div id="summary"></div></div></header>
   <main>
     <div>
       <section>
