@@ -113,6 +113,19 @@ def _has_recent_attempt(job_id: str) -> bool:
     return bool(completed_ts and time.time() - completed_ts < settings.SHEET_AGENT_RETRY_SECONDS)
 
 
+def _geo_counts(sheet: dict[str, Any]) -> tuple[int, int]:
+    ready = 0
+    requested = 0
+    for item in sheet.get("geo_items") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("target_path"):
+            requested += 1
+        if item.get("geo_exists") is True and item.get("target_path"):
+            ready += 1
+    return ready, requested
+
+
 def enqueue_jobs(jobs: list[dict[str, Any]], source: str = "unknown", force: bool = False, front: bool = False) -> dict[str, Any]:
     now = time.time()
     added = 0
@@ -288,6 +301,17 @@ def _item_with_state(item: dict[str, Any] | None) -> dict[str, Any] | None:
         enriched["project_root"] = project_root
         enriched["project_name"] = str(project_root).replace("\\", "/").rstrip("/").split("/")[-1]
     enriched["agent_status"] = sheet.get("status")
+    ready_count, requested_count = _geo_counts(sheet)
+    started_ts = float(sheet.get("started_ts") or item.get("started_ts") or 0)
+    completed_ts = float(sheet.get("completed_ts") or 0)
+    enriched["identified_parts_count"] = int(sheet.get("identified_parts_count") or 0)
+    enriched["processed_parts_count"] = int(sheet.get("processed_parts_count") or ready_count)
+    enriched["geo_ready_count"] = int(sheet.get("geo_ready_count") or ready_count)
+    enriched["geo_requested_count"] = int(sheet.get("geo_requested_count") or requested_count)
+    enriched["analysis_started_ts"] = started_ts
+    enriched["analysis_completed_ts"] = completed_ts
+    enriched["analysis_elapsed_seconds"] = max(0, (completed_ts or time.time()) - started_ts) if started_ts else 0
+    enriched["process_duration_seconds"] = float(sheet.get("process_duration_seconds") or 0)
     return enriched
 
 

@@ -172,6 +172,13 @@ def _history_items(limit: int = 300) -> list[dict[str, Any]]:
         job = state.get("job") or {}
         result = sheet.get("ofertare_result") or {}
         geo_items = sheet.get("geo_items") or []
+        ready_geo_count = len([item for item in geo_items if item.get("geo_exists") is True])
+        requested_geo_count = len([item for item in geo_items if item.get("target_path")])
+        started_ts = float(sheet.get("started_ts") or 0)
+        completed_ts = float(sheet.get("completed_ts") or 0)
+        duration_seconds = float(sheet.get("process_duration_seconds") or 0)
+        if not duration_seconds and started_ts and completed_ts:
+            duration_seconds = max(0, completed_ts - started_ts)
         project_root = str(result.get("projectRoot") or result.get("project_root") or "")
         project_name = str(result.get("projectName") or project_root.replace("\\", "/").rstrip("/").split("/")[-1] or "")
         offer_id = str(state.get("offer_id") or job.get("offer_id") or "")
@@ -185,11 +192,14 @@ def _history_items(limit: int = 300) -> list[dict[str, Any]]:
                 "status": sheet.get("status") or "",
                 "project_root": project_root,
                 "project_name": project_name,
-                "geo_count": len([item for item in geo_items if item.get("target_path")]),
-                "ready_geo_count": len([item for item in geo_items if item.get("geo_exists") is True]),
+                "identified_parts_count": int(sheet.get("identified_parts_count") or 0),
+                "processed_parts_count": int(sheet.get("processed_parts_count") or ready_geo_count),
+                "geo_count": requested_geo_count,
+                "ready_geo_count": ready_geo_count,
                 "updated_ts": state.get("updated_ts") or sheet.get("completed_ts") or sheet.get("started_ts") or 0,
-                "started_ts": sheet.get("started_ts") or 0,
-                "completed_ts": sheet.get("completed_ts") or 0,
+                "started_ts": started_ts,
+                "completed_ts": completed_ts,
+                "duration_seconds": duration_seconds,
                 "error": sheet.get("error") or "",
             }
         )
@@ -217,6 +227,9 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
         geo_count = int(item.get("geo_count") or 0)
         ready_geo_count = int(item.get("ready_geo_count") or 0)
         completed_ts = float(item.get("completed_ts") or item.get("updated_ts") or 0)
+        identified_parts = int(item.get("identified_parts_count") or 0)
+        processed_parts = int(item.get("processed_parts_count") or ready_geo_count)
+        duration_seconds = float(item.get("duration_seconds") or 0)
         xometry_link = (
             f'<a href="{html.escape(xometry_url, quote=True)}" target="_blank" rel="noreferrer">{html.escape(job_id)}</a>'
             if xometry_url
@@ -239,11 +252,13 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
             f"<td><span class=\"status {html.escape(status)}\">{html.escape(status or '-')}</span></td>"
             f"<td>{dosar_link}<div class=\"muted path\">{html.escape(project_root)}</div></td>"
             f"<td>{geo_link}<div class=\"muted\">{html.escape(geo_note)}</div></td>"
+            f"<td><strong>{processed_parts}/{identified_parts or '-'}</strong><div class=\"muted\">procesate / identificate</div></td>"
+            f"<td data-duration=\"{duration_seconds}\"></td>"
             f"<td data-ts=\"{completed_ts}\"></td>"
             f"<td class=\"err\">{html.escape(error)}</td>"
             f"</tr>"
         )
-    table_rows = "".join(rows) or '<tr><td colspan="6">Nu exista istoric inca.</td></tr>'
+    table_rows = "".join(rows) or '<tr><td colspan="8">Nu exista istoric inca.</td></tr>'
     return HTMLResponse(f"""<!doctype html>
 <html lang="ro">
 <head>
@@ -271,11 +286,24 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
   <header><h1>Istoric XometryAnaliza</h1><div class="sub">Oferte procesate de agentul sheet/laser</div></header>
   <main>
     <table>
-      <thead><tr><th>Oferta</th><th>Status</th><th>Dosar</th><th>GEO</th><th>Finalizat</th><th>Eroare</th></tr></thead>
+      <thead><tr><th>Oferta</th><th>Status</th><th>Dosar</th><th>GEO</th><th>Piese</th><th>Durata</th><th>Finalizat</th><th>Eroare</th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
   </main>
   <script>
+    const fmtDuration = seconds => {{
+      seconds = Math.max(0, Math.round(Number(seconds || 0)));
+      if (!seconds) return '-';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (h) return `${{h}}h ${{m}}m`;
+      if (m) return `${{m}}m ${{s}}s`;
+      return `${{s}}s`;
+    }};
+    document.querySelectorAll('td[data-duration]').forEach(td => {{
+      td.textContent = fmtDuration(td.dataset.duration);
+    }});
     document.querySelectorAll('td[data-ts]').forEach(td => {{
       const ts = Number(td.dataset.ts || 0);
       td.textContent = ts ? new Date(ts * 1000).toLocaleString() : '-';
@@ -338,12 +366,32 @@ def dashboard() -> HTMLResponse:
   <script>
     const api = async (url, options={}) => (await fetch(url,{headers:{'Content-Type':'application/json'},...options})).json();
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const fmtDuration = (seconds) => {
+      seconds = Math.max(0, Math.round(Number(seconds || 0)));
+      if (!seconds) return '-';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (h) return `${h}h ${m}m`;
+      if (m) return `${m}m ${s}s`;
+      return `${s}s`;
+    };
     const xometryUrl = (item) => item?.url || (item?.offer_id ? `https://partner.xometry.eu/offers/${encodeURIComponent(item.offer_id)}?gsh=true&source=jobs&locale=en` : '');
     function jobName(item, prefix=''){
       const url = xometryUrl(item);
       const label = esc(item?.job_id || item?.title || item?.offer_id || 'oferta');
       const text = `${prefix}${label}`;
       return url ? `<a href="${esc(url)}" target="_blank" rel="noreferrer">${text}</a>` : text;
+    }
+    function progressHtml(item){
+      if (!item) return '';
+      const identified = Number(item.identified_parts_count || 0);
+      const processed = Number(item.processed_parts_count || item.geo_ready_count || 0);
+      const ready = Number(item.geo_ready_count || 0);
+      const requested = Number(item.geo_requested_count || 0);
+      const elapsed = Number(item.analysis_elapsed_seconds || 0);
+      const duration = Number(item.process_duration_seconds || 0);
+      return `<div class="meta">piese: ${processed}/${identified || '-'} procesate · GEO: ${ready}/${requested} gata · in analiza: ${fmtDuration(elapsed)}${duration ? ` · durata finala: ${fmtDuration(duration)}` : ''}</div>`;
     }
     function projectButton(item){
       if (!item?.offer_id) return '';
@@ -386,8 +434,8 @@ def dashboard() -> HTMLResponse:
       const active = data.active;
       const pausedItem = data.paused_item;
       const idleText = paused ? `Dorina este ocupata in TecZone. Reiau coada la ${pauseUntil}.<div class="meta">${data.pause_reason||''}</div>` : 'Laptopul nu proceseaza desfasurata acum.';
-      const pausedHtml = pausedItem ? `<div class="id">${jobName(pausedItem)}</div><div class="meta">${esc(data.pause_reason||'')}</div>${projectButton(pausedItem)}` : idleText;
-      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${jobName(active)}</div><div class="meta">${esc(active.title||'')}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>${projectButton(active)}`:pausedHtml}</div>`;
+      const pausedHtml = pausedItem ? `<div class="id">${jobName(pausedItem)}</div><div class="meta">${esc(data.pause_reason||'')}</div>${progressHtml(pausedItem)}${projectButton(pausedItem)}` : idleText;
+      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${jobName(active)}</div><div class="meta">${esc(active.title||'')}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>${progressHtml(active)}${projectButton(active)}`:pausedHtml}</div>`;
       document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi sheet/laser in asteptare.</div>';
       const logs = await api('/api/agents/logs?limit=20');
       document.getElementById('logs').textContent = (logs.items||[]).reverse().map(x => `${new Date((x.ts||0)*1000).toLocaleTimeString()} ${x.type}: ${x.message}`).join('\\n');

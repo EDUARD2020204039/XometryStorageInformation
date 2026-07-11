@@ -74,6 +74,12 @@ def _sheet_part_ids(job: dict[str, Any]) -> set[str]:
     return ids
 
 
+def _sheet_part_count(job: dict[str, Any]) -> int:
+    parts = [part for part in job.get("parts") or [] if isinstance(part, dict)]
+    sheet_parts = [part for part in parts if any(keyword in _part_process_text(part) for keyword in SHEET_KEYWORDS)]
+    return len(sheet_parts) or len(_sheet_part_ids(job)) or len(parts)
+
+
 def _geo_item_text(item: dict[str, Any]) -> str:
     return " ".join(
         str(item.get(key) or "")
@@ -156,12 +162,20 @@ class SheetMetalLaserAgent:
             [item for item in previous_geo if item.get("geo_exists") is True and item.get("target_path")],
         )
         if previous_ready_geo:
+            completed_ts = time.time()
             append_event("sheet.geo.cached", f"Sheet agent already has GEO for {job_id}", job_id=job_id, offer_id=offer_id)
             return {
                 "agent": self.name,
                 "status": "cached",
                 "geo_items": previous_ready_geo,
                 "matched_sheet_part_ids": sorted(_sheet_part_ids(job)),
+                "identified_parts_count": _sheet_part_count(job),
+                "processed_parts_count": len(previous_ready_geo),
+                "geo_ready_count": len(previous_ready_geo),
+                "geo_requested_count": len(previous_ready_geo),
+                "started_ts": completed_ts,
+                "completed_ts": completed_ts,
+                "process_duration_seconds": 0,
             }
 
         is_rfq_without_offer = job_id.upper().startswith("RFQ-") and (not offer_id or "/rfqs/" in url)
@@ -198,6 +212,10 @@ class SheetMetalLaserAgent:
             "status": "running",
             "started_ts": started_ts,
             "url": url,
+            "identified_parts_count": _sheet_part_count(job),
+            "processed_parts_count": 0,
+            "geo_ready_count": 0,
+            "geo_requested_count": 0,
         }
         save_job_state(
             job_id,
@@ -239,6 +257,9 @@ class SheetMetalLaserAgent:
                 if any(item.get("geo_exists") for item in geo_items)
                 else "geo_requested"
             )
+            completed_ts = time.time()
+            geo_requested_count = len([item for item in geo_items if item.get("target_path")])
+            geo_ready_count = len([item for item in geo_items if item.get("geo_exists") is True and item.get("target_path")])
             output = {
                 "agent": self.name,
                 "status": status,
@@ -247,7 +268,13 @@ class SheetMetalLaserAgent:
                 "bend_report": bend_report,
                 "error": failure_reason,
                 "matched_sheet_part_ids": sorted(_sheet_part_ids(job)),
-                "completed_ts": time.time(),
+                "identified_parts_count": _sheet_part_count(job),
+                "processed_parts_count": geo_ready_count,
+                "geo_ready_count": geo_ready_count,
+                "geo_requested_count": geo_requested_count,
+                "started_ts": started_ts,
+                "completed_ts": completed_ts,
+                "process_duration_seconds": max(0, completed_ts - started_ts),
             }
             append_event("sheet.done", f"Sheet agent finished {job_id}: {status}", job_id=job_id, offer_id=offer_id, geo_items=geo_items)
             if geo_items and settings.TELEGRAM_GEO_LOGS:
@@ -255,11 +282,18 @@ class SheetMetalLaserAgent:
                 send_log(f"XometryAnaliza: GEO pentru {job_id}: {first_geo}")
             return output
         except Exception as exc:
+            completed_ts = time.time()
             output = {
                 "agent": self.name,
                 "status": "failed",
                 "error": f"{type(exc).__name__}: {exc}",
-                "completed_ts": time.time(),
+                "identified_parts_count": _sheet_part_count(job),
+                "processed_parts_count": 0,
+                "geo_ready_count": 0,
+                "geo_requested_count": 0,
+                "started_ts": started_ts,
+                "completed_ts": completed_ts,
+                "process_duration_seconds": max(0, completed_ts - started_ts),
             }
             append_event("sheet.failed", f"Sheet agent failed {job_id}: {output['error']}", job_id=job_id, offer_id=offer_id)
             if settings.TELEGRAM_SHEET_FAILURE_LOGS:
