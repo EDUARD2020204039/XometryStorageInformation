@@ -301,6 +301,9 @@ def _item_with_state(item: dict[str, Any] | None) -> dict[str, Any] | None:
         enriched["project_root"] = project_root
         enriched["project_name"] = str(project_root).replace("\\", "/").rstrip("/").split("/")[-1]
     enriched["agent_status"] = sheet.get("status")
+    enriched["error"] = sheet.get("error") or ""
+    enriched["failure_type"] = sheet.get("failure_type") or ""
+    enriched["failure_action"] = sheet.get("failure_action") or ""
     ready_count, requested_count = _geo_counts(sheet)
     started_ts = float(sheet.get("started_ts") or item.get("started_ts") or 0)
     completed_ts = float(sheet.get("completed_ts") or 0)

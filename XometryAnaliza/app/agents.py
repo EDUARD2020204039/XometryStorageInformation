@@ -5,6 +5,7 @@ from typing import Any
 
 from . import settings
 from .ofertare_client import extract_geo_items, run_ofertare_automata, run_teczone_folder
+from .geo_files import read_remote_file
 from .store import append_event, load_job_state, save_job_state
 from .telegram_log import send_log
 from .xometry_backend_client import lookup_dosar_references
@@ -101,20 +102,80 @@ def _filter_geo_items_for_sheet_parts(job: dict[str, Any], geo_items: list[dict[
     return filtered
 
 
-def _ofertare_failure_reason(result: dict[str, Any]) -> str:
+def _result_text(result: dict[str, Any]) -> str:
     warnings = [str(item or "") for item in result.get("warnings") or []]
-    warning_text = "\n".join(warnings).lower()
-    if "pagina de login" in warning_text or "xometry_email/xometry_password" in warning_text:
-        return "Ofertare a primit pagina de login Xometry; lipsesc credentialele Xometry pentru agent."
-    if "nu am gasit nicio piesa" in warning_text or "nu exista piese/step" in warning_text:
-        return "Ofertare nu a gasit piese/STEP in captura Xometry."
+    trutops = []
+    for item in result.get("trutops") or []:
+        if isinstance(item, dict):
+            trutops.extend(str(item.get(key) or "") for key in ("classification", "reason", "message", "status"))
+    return "\n".join(warnings + trutops).lower()
+
+
+def _read_capture_hint(result: dict[str, Any]) -> str:
+    for file_path in result.get("files") or []:
+        path = str(file_path or "")
+        if not path.lower().endswith(".body.txt"):
+            continue
+        try:
+            return read_remote_file(path).decode("utf-8", "replace")[:12000].lower()
+        except Exception:
+            return ""
+    return ""
+
+
+def _classify_ofertare_failure(result: dict[str, Any]) -> dict[str, Any]:
+    text = _result_text(result)
+    capture_hint = ""
+    login_tokens = (
+        "pagina de login",
+        "xometry_email/xometry_password",
+        "basic_email",
+        "basic_password",
+        "sign in",
+        "log in",
+    )
+    if any(token in text for token in login_tokens):
+        return {
+            "status": "blocked_login",
+            "failure_type": "xometry_login_required",
+            "message": "Ofertare a ajuns la login Xometry; verifica sesiunea sau credentialele Xometry pe laptopul de ofertare.",
+            "action": "Deschide Ofertare-Automata pe laptop, refa login-ul Xometry si retrimite jobul manual.",
+        }
+
+    document_tokens = (
+        "nu am descarcat automat fisierele",
+        "nu am gasit nicio piesa",
+        "nu exista piese/step",
+        "xometry_parts_missing",
+        "source_missing",
+    )
+    if any(token in text for token in document_tokens):
+        capture_hint = _read_capture_hint(result)
+        if "something went wrong" in capture_hint or "we couldn" in capture_hint:
+            message = "Xometry a returnat pagina de eroare in loc de documentatie; nu am de unde sa extrag STEP/GEO."
+        elif "back to rfqs" in capture_hint and "not a partner" in capture_hint:
+            message = "RFQ-ul nu a incarcat documentatia pentru partener; captura nu contine fisiere STEP."
+        else:
+            message = "Nu s-au descarcat fisierele Xometry/STEP; TecZone nu poate porni fara documentatie."
+        return {
+            "status": "blocked_documentation",
+            "failure_type": "xometry_documentation_unavailable",
+            "message": message,
+            "action": "Verifica pagina Xometry si folderul DOC al proiectului; daca fisierele apar manual, retrimite jobul din dashboard.",
+            "capture_hint": capture_hint[:500],
+        }
 
     for item in result.get("trutops") or []:
         classification = str(item.get("classification") or "").lower()
         reason = str(item.get("reason") or item.get("message") or "")
         if classification in {"xometry_parts_missing", "source_missing"}:
-            return reason or "Ofertare nu a gasit piese/STEP pentru TecZone."
-    return ""
+            return {
+                "status": "blocked_documentation",
+                "failure_type": classification,
+                "message": reason or "Ofertare nu a gasit piese/STEP pentru TecZone.",
+                "action": "Verifica documentatia descarcata si retrimite jobul dupa ce exista STEP in DOC.",
+            }
+    return {}
 
 
 class RouterAgent:
@@ -240,8 +301,9 @@ class SheetMetalLaserAgent:
                 result = run_ofertare_automata(job)
             raw_geo_items = extract_geo_items(result)
             geo_items = _filter_geo_items_for_sheet_parts(job, raw_geo_items)
-            failure_reason = _ofertare_failure_reason(result)
-            bend_report = build_bend_artifacts(job_id, offer_id, result, geo_items) if offer_id and not failure_reason else None
+            failure = _classify_ofertare_failure(result)
+            failure_reason = str(failure.get("message") or "")
+            bend_report = build_bend_artifacts(job_id, offer_id, result, geo_items) if offer_id and not failure else None
             agent_busy_items = geo_items or raw_geo_items
             agent_busy = bool(agent_busy_items) and all(
                 str(item.get("classification") or "").lower() == "agent_busy"
@@ -251,8 +313,8 @@ class SheetMetalLaserAgent:
             status = (
                 "agent_busy"
                 if agent_busy
-                else "failed"
-                if failure_reason
+                else str(failure.get("status") or "")
+                if failure
                 else "geo_ready"
                 if any(item.get("geo_exists") for item in geo_items)
                 else "geo_requested"
@@ -276,6 +338,23 @@ class SheetMetalLaserAgent:
                 "completed_ts": completed_ts,
                 "process_duration_seconds": max(0, completed_ts - started_ts),
             }
+            if failure:
+                output.update(
+                    {
+                        "failure_type": failure.get("failure_type"),
+                        "failure_action": failure.get("action"),
+                        "can_retry": True,
+                    }
+                )
+                append_event(
+                    "sheet.blocked",
+                    f"Sheet agent blocked {job_id}: {failure_reason}",
+                    job_id=job_id,
+                    offer_id=offer_id,
+                    status=status,
+                    failure_type=failure.get("failure_type"),
+                    action=failure.get("action"),
+                )
             append_event("sheet.done", f"Sheet agent finished {job_id}: {status}", job_id=job_id, offer_id=offer_id, geo_items=geo_items)
             if geo_items and settings.TELEGRAM_GEO_LOGS:
                 first_geo = geo_items[0].get("target_path")

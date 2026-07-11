@@ -211,6 +211,8 @@ def _history_items(limit: int = 300) -> list[dict[str, Any]]:
                 "completed_ts": completed_ts,
                 "duration_seconds": duration_seconds,
                 "error": sheet.get("error") or "",
+                "failure_action": sheet.get("failure_action") or "",
+                "failure_type": sheet.get("failure_type") or "",
             }
         )
     return sorted(items, key=lambda item: float(item.get("updated_ts") or 0), reverse=True)
@@ -234,6 +236,7 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
         project_root = str(item.get("project_root") or "")
         status = str(item.get("status") or "")
         error = str(item.get("error") or "")
+        failure_action = str(item.get("failure_action") or "")
         geo_count = int(item.get("geo_count") or 0)
         ready_geo_count = int(item.get("ready_geo_count") or 0)
         completed_ts = float(item.get("completed_ts") or item.get("updated_ts") or 0)
@@ -256,6 +259,9 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
             else '<span class="muted">-</span>'
         )
         geo_note = f"cerute: {geo_count} / gata: {ready_geo_count}" if geo_count else f"gata: {ready_geo_count}"
+        error_html = html.escape(error)
+        if failure_action:
+            error_html += f'<div class="muted">{html.escape(failure_action)}</div>'
         rows.append(
             f"<tr>"
             f"<td><strong>{xometry_link}</strong><div class=\"muted\">{html.escape(offer_id)}</div></td>"
@@ -265,7 +271,7 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
             f"<td><strong>{processed_parts}/{identified_parts or '-'}</strong><div class=\"muted\">procesate / identificate</div></td>"
             f"<td data-duration=\"{duration_seconds}\"></td>"
             f"<td data-ts=\"{completed_ts}\"></td>"
-            f"<td class=\"err\">{html.escape(error)}</td>"
+            f"<td class=\"err\">{error_html}</td>"
             f"</tr>"
         )
     table_rows = "".join(rows) or '<tr><td colspan="8">Nu exista istoric inca.</td></tr>'
@@ -288,7 +294,7 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
     .green{{border-color:#16a34a;background:#ecfdf3;color:#166534}}
     .muted{{margin-top:4px;color:#64748b;font-size:12px}} .path{{max-width:520px;word-break:break-all}}
     .status{{display:inline-flex;min-height:22px;align-items:center;border-radius:999px;padding:0 8px;background:#e2e8f0;color:#334155;font-size:12px;font-weight:700}}
-    .geo_ready,.cached{{background:#dcfce7;color:#166534}} .running{{background:#dbeafe;color:#1d4ed8}} .failed{{background:#fee2e2;color:#991b1b}} .geo_requested{{background:#fef3c7;color:#92400e}}
+    .geo_ready,.cached{{background:#dcfce7;color:#166534}} .running{{background:#dbeafe;color:#1d4ed8}} .failed,.blocked_login,.blocked_documentation{{background:#fee2e2;color:#991b1b}} .geo_requested{{background:#fef3c7;color:#92400e}}
     .err{{max-width:360px;color:#991b1b;font-size:12px;word-break:break-word}}
   </style>
 </head>
@@ -401,7 +407,9 @@ def dashboard() -> HTMLResponse:
       const requested = Number(item.geo_requested_count || 0);
       const elapsed = Number(item.analysis_elapsed_seconds || 0);
       const duration = Number(item.process_duration_seconds || 0);
-      return `<div class="meta">piese: ${processed}/${identified || '-'} procesate · GEO: ${ready}/${requested} gata · in analiza: ${fmtDuration(elapsed)}${duration ? ` · durata finala: ${fmtDuration(duration)}` : ''}</div>`;
+      const diagnostic = item.error ? `<div class="meta bad">${esc(item.error)}</div>` : '';
+      const action = item.failure_action ? `<div class="meta">${esc(item.failure_action)}</div>` : '';
+      return `<div class="meta">piese: ${processed}/${identified || '-'} procesate - GEO: ${ready}/${requested} gata - in analiza: ${fmtDuration(elapsed)}${duration ? ` - durata finala: ${fmtDuration(duration)}` : ''}</div>${diagnostic}${action}`;
     }
     function projectButton(item){
       if (!item?.offer_id) return '';
@@ -602,12 +610,23 @@ def project_status_view(offer_id: str) -> HTMLResponse:
     project_root = str(result.get("projectRoot") or result.get("project_root") or "")
     files = [str(item) for item in result.get("files") or []]
     warnings = [str(item) for item in result.get("warnings") or []]
+    error = str(sheet.get("error") or "")
+    failure_action = str(sheet.get("failure_action") or "")
     geo_items = sheet.get("geo_items") or []
     job_id = str(state.get("job_id") or job.get("id") or offer_id)
     xometry_url = str(job.get("link") or job.get("url") or "")
     geo_url = f"/api/agents/geo/{quote(offer_id, safe='')}/view"
     rows = "".join(f"<li><code>{html.escape(path)}</code></li>" for path in files) or "<li>Nu exista fisiere raportate inca.</li>"
     warning_rows = "".join(f"<li>{html.escape(text)}</li>" for text in warnings) or "<li>Nu sunt warning-uri raportate.</li>"
+    error_block = (
+        f"""<section>
+      <h2>Diagnostic</h2>
+      <p class="err">{html.escape(error)}</p>
+      <p>{html.escape(failure_action)}</p>
+    </section>"""
+        if error or failure_action
+        else ""
+    )
     geo_rows = "".join(
         f"<li>{html.escape(str(item.get('part_name') or item.get('partName') or 'part'))}: "
         f"<code>{html.escape(str(item.get('target_path') or item.get('targetPath') or ''))}</code></li>"
@@ -634,6 +653,7 @@ def project_status_view(offer_id: str) -> HTMLResponse:
     ul{{margin:8px 0 0;padding-left:22px}} li{{margin:6px 0}}
     .button{{display:inline-flex;align-items:center;justify-content:center;height:34px;padding:0 12px;border:1px solid #1677ff;border-radius:5px;background:#1677ff;color:white;text-decoration:none;font-weight:700;margin-right:8px}}
     .secondary{{background:white;color:#0958d9}}
+    .err{{color:#991b1b;font-weight:700}}
   </style>
 </head>
 <body>
@@ -647,6 +667,7 @@ def project_status_view(offer_id: str) -> HTMLResponse:
       {xometry_link}
       <a class="button secondary" href="{geo_url}" target="_blank" rel="noreferrer">Desfasurate GEO</a>
     </section>
+    {error_block}
     <section>
       <h2>Folder Ofertare</h2>
       <code>{html.escape(project_root or "Nu exista projectRoot inca.")}</code>

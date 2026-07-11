@@ -169,6 +169,7 @@ def run_iteration():
         geo_url = None
         geo_state_key = "geo:none"
         geo_ready_items = _geo_items(geo_status, job)
+        geo_blocked = False
         if geo_ready_items and offer_id:
             geo_links = []
             for number, (item_index, item) in enumerate(geo_ready_items, start=1):
@@ -184,6 +185,17 @@ def run_iteration():
             geo_line = "GEO: RFQ fără fișiere pentru desfașurată automată\n"
             geo_state_key = "geo:skipped_rfq"
 
+        if not geo_ready_items and geo_status and geo_status.get("status") in ("blocked_login", "blocked_documentation"):
+            geo_blocked = True
+            state = geo_status.get("state") or {}
+            sheet = state.get("sheet_metal_laser") or {}
+            reason = sheet.get("error") or geo_status.get("status")
+            action = sheet.get("failure_action") or ""
+            geo_line = f"GEO: blocat - {escape_html(reason)}\n"
+            if action:
+                geo_line += f"Actiune: {escape_html(action)}\n"
+            geo_state_key = f"geo:{geo_status.get('status')}:{reason}"
+
         keyboard = []
         if offer_id:
             keyboard.append([{"text": "❌ Decline", "callback_data": f"decline:{offer_id}"}])
@@ -198,7 +210,7 @@ def run_iteration():
             f"Process: {process_safe}\n"
             f"{geo_line}"
         )
-        return msg, reply_markup, geo_state_key, bool(geo_ready_items)
+        return msg, reply_markup, geo_state_key, bool(geo_ready_items), geo_blocked
 
     def _orders_sync_state_path():
         return os.path.join("data", "orders_last_sync.txt")
@@ -352,9 +364,9 @@ def run_iteration():
                 if filter.is_interesting(job):
                     interesting_count += 1
                     geo_status = _fetch_geo_status(job)
-                    msg, reply_markup, geo_state_key, geo_ready = _interesting_message(job, geo_status)
+                    msg, reply_markup, geo_state_key, geo_ready, geo_blocked = _interesting_message(job, geo_status)
                     logger.info(f"Checking/Sending notification for {job['id']}")
-                    if _requires_geo_before_notify(job) and not geo_ready:
+                    if _requires_geo_before_notify(job) and not geo_ready and not geo_blocked:
                         status = (geo_status or {}).get("status") or "not_ready"
                         logger.info(f"Waiting for GEO before Telegram notification for {job['id']} ({status}).")
                         continue
