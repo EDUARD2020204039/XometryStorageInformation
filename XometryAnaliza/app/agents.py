@@ -178,9 +178,9 @@ class SheetMetalLaserAgent:
                 "process_duration_seconds": 0,
             }
 
-        is_rfq_without_offer = job_id.upper().startswith("RFQ-") and (not offer_id or "/rfqs/" in url)
+        is_rfq_without_offer = job_id.upper().startswith("RFQ-") and not url
         if is_rfq_without_offer:
-            message = "RFQ sheet/laser job skipped: no Xometry offer page/files available for automatic GEO extraction."
+            message = "RFQ sheet/laser job skipped: no RFQ URL/files available for automatic GEO extraction."
             append_event("sheet.skip_rfq", f"{message} {job_id}", job_id=job_id, offer_id=offer_id, url=url)
             return {
                 "agent": self.name,

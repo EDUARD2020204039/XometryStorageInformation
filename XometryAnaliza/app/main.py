@@ -45,6 +45,7 @@ def _run_jobs(payload: AgentJobsPayload) -> None:
 
 JOB_ID_RE = re.compile(r"\b(?:HJO|J|RFQ)-\d+(?:-\d+)?\b", re.IGNORECASE)
 OFFER_URL_RE = re.compile(r"/offers/(\d+)", re.IGNORECASE)
+RFQ_URL_RE = re.compile(r"/rfqs/([^/?#]+)", re.IGNORECASE)
 
 
 def _xometry_offer_url(offer_id: str = "", job_id: str = "") -> str:
@@ -52,7 +53,9 @@ def _xometry_offer_url(offer_id: str = "", job_id: str = "") -> str:
     if not value:
         return ""
     if str(job_id or "").upper().startswith("RFQ-"):
-        return f"https://partner.xometry.eu/rfqs/{quote(str(job_id), safe='')}"
+        rfq_value = str(job_id).strip()
+        rfq_slug = rfq_value[4:] if rfq_value.upper().startswith("RFQ-") else rfq_value
+        return f"https://partner.xometry.eu/rfqs/{quote(rfq_slug, safe='')}?source=rfqs"
     suffix = "?gsh=true&source=jobs&locale=en" if str(job_id or "").upper().startswith(("HJO-", "J-")) else "?source=jobs&locale=en"
     return f"https://partner.xometry.eu/offers/{quote(value, safe='')}{suffix}"
 
@@ -83,6 +86,13 @@ def _manual_job_from_payload(payload: ManualJobPayload) -> dict[str, Any]:
     offer_match = OFFER_URL_RE.search(url or identifier)
     if offer_match and not offer_id:
         offer_id = offer_match.group(1)
+    rfq_match = RFQ_URL_RE.search(url or identifier)
+    if rfq_match:
+        rfq_slug = rfq_match.group(1).strip()
+        if not job_id:
+            job_id = rfq_slug.upper() if rfq_slug.upper().startswith("RFQ-") else f"RFQ-{rfq_slug}"
+        if not offer_id:
+            offer_id = rfq_slug
     job_match = JOB_ID_RE.search(source_text)
     if job_match and not job_id:
         job_id = job_match.group(0).upper()
@@ -351,7 +361,7 @@ def dashboard() -> HTMLResponse:
         <h2>Trimite job manual</h2>
         <div class="panel">
           <form class="manual" onsubmit="submitManual(event)">
-            <input id="manualJob" placeholder="URL, offer id, HJO-... sau J-..." autocomplete="off">
+            <input id="manualJob" placeholder="URL, offer id, HJO-..., J-... sau RFQ URL" autocomplete="off">
             <button type="submit">Trimite job</button>
           </form>
           <div class="hint">Il pune primul in coada si forteaza refacerea daca a mai fost vazut.</div>
@@ -521,7 +531,7 @@ def mcp_tools(x_mcp_token: str | None = Header(default=None)) -> dict[str, Any]:
             "queue.move": {"job_id": "HJO-... or J-...", "direction": "up|down"},
             "queue.reorder": {"job_ids": ["HJO-1", "J-2"]},
             "queue.submit": {"source": "hermes", "jobs": []},
-            "queue.submit_manual": {"identifier": "URL, offer id, HJO-... or J-...", "force": True, "front": True},
+            "queue.submit_manual": {"identifier": "URL, offer id, HJO-..., J-... or RFQ URL", "force": True, "front": True},
         },
     }
 
@@ -1285,6 +1295,14 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
       font-weight: 700;
       cursor: pointer;
     }}
+    .icon-button.wide {{
+      min-width: 58px;
+    }}
+    .icon-button.active {{
+      border-color: #f59e0b;
+      background: #fff7ed;
+      color: #9a3412;
+    }}
     .cad-frame {{
       height: calc(100vh - 285px);
       min-height: 520px;
@@ -1350,6 +1368,22 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
       text-align: center;
       z-index: 2;
       pointer-events: none;
+    }}
+    .measure-readout {{
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      z-index: 3;
+      min-width: 190px;
+      border: 1px solid rgba(251, 191, 36, 0.55);
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.86);
+      color: #fde68a;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-weight: 700;
+      pointer-events: none;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
     }}
     .cad-empty {{
       display: flex;
@@ -1528,6 +1562,8 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
           <button class="icon-button" type="button" data-geo-zoom="in" title="Zoom in">+</button>
           <button class="icon-button" type="button" data-geo-zoom="out" title="Zoom out">-</button>
           <button class="icon-button" type="button" data-geo-zoom="fit" title="Fit">Fit</button>
+          <button class="icon-button wide" type="button" id="step-measure-toggle" title="Masoara pe 3D">Masura</button>
+          <button class="icon-button wide" type="button" id="step-measure-clear" title="Sterge masurarea">Clear</button>
         </div>
       </div>
       <div class="viewer-split">
@@ -1539,6 +1575,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
           <div class="pane-label"><span>Vedere 3D STEP</span><span class="step-path" title="{safe_step_path}">{safe_step_path}</span></div>
           <div id="step-viewer" class="step-frame" data-step-url="{safe_step_url}">
             <div id="step-status" class="step-status">{safe_step_status}</div>
+            <div id="step-measure-readout" class="measure-readout">Masura: click pe doua puncte</div>
           </div>
         </div>
       </div>
@@ -1614,7 +1651,11 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
 
     const container = document.getElementById('step-viewer');
     const status = document.getElementById('step-status');
+    const measureReadout = document.getElementById('step-measure-readout');
+    const measureButton = document.getElementById('step-measure-toggle');
+    const clearMeasureButton = document.getElementById('step-measure-clear');
     const stepUrl = container?.dataset.stepUrl || '';
+    let measureEnabled = false;
 
     const setStatus = (text, persistent = false) => {{
       if (!status) return;
@@ -1677,6 +1718,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
 
         const group = new THREE.Group();
         scene.add(group);
+        const solidMeshes = [];
         for (const mesh of result.meshes) {{
           const geometry = new THREE.BufferGeometry();
           const positions = flatten(mesh?.attributes?.position?.array);
@@ -1700,6 +1742,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
           }});
           const solid = new THREE.Mesh(geometry, material);
           group.add(solid);
+          solidMeshes.push(solid);
           const edges = new THREE.LineSegments(
             new THREE.EdgesGeometry(geometry, 35),
             new THREE.LineBasicMaterial({{ color: 0x1e293b, transparent: true, opacity: 0.42 }})
@@ -1725,6 +1768,82 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
         grid.rotation.x = Math.PI / 2;
         grid.position.z = -size.z / 2 - maxDim * 0.04;
         scene.add(grid);
+
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        const measurePoints = [];
+        const measureMarkers = [];
+        let measureLine = null;
+        const markerGeometry = new THREE.SphereGeometry(maxDim * 0.012, 18, 12);
+        const markerMaterial = new THREE.MeshBasicMaterial({{ color: 0xfbbf24 }});
+        const lineMaterial = new THREE.LineBasicMaterial({{ color: 0xfbbf24, linewidth: 2 }});
+
+        const formatMm = (value) => `${{value.toFixed(2)}} mm`;
+        const setMeasureText = (text) => {{
+          if (measureReadout) measureReadout.textContent = text;
+        }};
+        const clearMeasure = () => {{
+          measurePoints.length = 0;
+          for (const marker of measureMarkers.splice(0)) {{
+            scene.remove(marker);
+          }}
+          if (measureLine) {{
+            scene.remove(measureLine);
+            measureLine.geometry.dispose();
+            measureLine = null;
+          }}
+          setMeasureText(measureEnabled ? 'Masura: click primul punct' : 'Masura: click pe doua puncte');
+        }};
+        const setMeasureEnabled = (enabled) => {{
+          measureEnabled = enabled;
+          controls.enabled = !enabled;
+          renderer.domElement.style.cursor = enabled ? 'crosshair' : 'grab';
+          measureButton?.classList.toggle('active', enabled);
+          setMeasureText(enabled ? 'Masura: click primul punct' : 'Masura: click pe doua puncte');
+        }};
+        const addMeasurePoint = (point) => {{
+          if (measurePoints.length >= 2) clearMeasure();
+          const localPoint = point.clone();
+          measurePoints.push(localPoint);
+          const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+          marker.position.copy(localPoint);
+          scene.add(marker);
+          measureMarkers.push(marker);
+          if (measurePoints.length === 1) {{
+            setMeasureText('Masura: click al doilea punct');
+            return;
+          }}
+          const distance = measurePoints[0].distanceTo(measurePoints[1]);
+          const geometry = new THREE.BufferGeometry().setFromPoints(measurePoints);
+          measureLine = new THREE.Line(geometry, lineMaterial);
+          scene.add(measureLine);
+          setMeasureText(`Masura: ${{formatMm(distance)}}`);
+        }};
+        measureButton?.addEventListener('click', () => {{
+          setMeasureEnabled(!measureEnabled);
+          if (measureEnabled) clearMeasure();
+        }});
+        clearMeasureButton?.addEventListener('click', clearMeasure);
+        renderer.domElement.addEventListener('pointerdown', (event) => {{
+          renderer.domElement.dataset.measureStartX = String(event.clientX);
+          renderer.domElement.dataset.measureStartY = String(event.clientY);
+        }});
+        renderer.domElement.addEventListener('pointerup', (event) => {{
+          if (!measureEnabled) return;
+          const startX = Number(renderer.domElement.dataset.measureStartX || event.clientX);
+          const startY = Number(renderer.domElement.dataset.measureStartY || event.clientY);
+          if (Math.hypot(event.clientX - startX, event.clientY - startY) > 4) return;
+          const rect = renderer.domElement.getBoundingClientRect();
+          pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+          pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(pointer, camera);
+          const hits = raycaster.intersectObjects(solidMeshes, false);
+          if (!hits.length) {{
+            setMeasureText('Masura: click pe suprafata piesei');
+            return;
+          }}
+          addMeasurePoint(hits[0].point);
+        }});
 
         setStatus('', false);
         const resize = () => {{

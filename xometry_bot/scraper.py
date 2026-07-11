@@ -184,12 +184,17 @@ def _is_gsh_job_id(job_id):
     return str(job_id or "").strip().upper().startswith(("HJO-", "J-"))
 
 
+def _rfq_url_slug(job_id):
+    value = str(job_id or "").strip()
+    return value[4:] if value.upper().startswith("RFQ-") else value
+
+
 def _build_offer_link(offer_id=None, job_id=None, prefer_job_id=False):
     is_gsh_job = _is_gsh_job_id(job_id)
     canonical_job_id = _extract_canonical_job_id(job_id)
     if prefer_job_id and canonical_job_id:
         if canonical_job_id.startswith("RFQ-"):
-            return f"https://partner.xometry.eu/rfqs/{canonical_job_id}"
+            return f"https://partner.xometry.eu/rfqs/{_rfq_url_slug(canonical_job_id)}?source=rfqs"
         return f"https://partner.xometry.eu/offers/{canonical_job_id}"
 
     if offer_id:
@@ -199,7 +204,7 @@ def _build_offer_link(offer_id=None, job_id=None, prefer_job_id=False):
 
     if canonical_job_id:
         if canonical_job_id.startswith("RFQ-"):
-            return f"https://partner.xometry.eu/rfqs/{canonical_job_id}"
+            return f"https://partner.xometry.eu/rfqs/{_rfq_url_slug(canonical_job_id)}?source=rfqs"
         return f"https://partner.xometry.eu/offers/{canonical_job_id}"
 
     job_id = (job_id or "").strip()
@@ -384,7 +389,7 @@ def _jobs_from_rfq_offers(offers):
         material = _join_unique(materials)
         process = _join_unique(processes)
 
-        link = f"https://partner.xometry.eu/rfqs/{job_id}" if job_id != "Unknown" else ""
+        link = f"https://partner.xometry.eu/rfqs/{_rfq_url_slug(job_id)}?source=rfqs" if job_id != "Unknown" else ""
 
         jobs.append({
             "id": job_id,
@@ -1585,8 +1590,7 @@ def extract_job_data(card: Locator, job_type="Standard"):
                      # Standard Job: https://partner.xometry.eu/offers/J-1736113-306487
                      link = f"https://partner.xometry.eu/offers/{job_id}"
                 elif job_id.startswith("RFQ-"):
-                     # RFQ: https://partner.xometry.eu/rfqs/RFQ-D14-0466
-                     link = f"https://partner.xometry.eu/rfqs/{job_id}"
+                     link = f"https://partner.xometry.eu/rfqs/{_rfq_url_slug(job_id)}?source=rfqs"
                 
         except Exception as e:
             logger.debug(f"Link extract error: {e}")
