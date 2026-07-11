@@ -102,7 +102,10 @@ def extract_geo_items(result: dict[str, Any]) -> list[dict[str, Any]]:
             geo_items.append(
                 {
                     "part_name": item.get("partName") or item.get("part_name"),
+                    "source_path": item.get("sourcePath") or item.get("source_path"),
+                    "original_source_path": item.get("originalSourcePath") or item.get("original_source_path"),
                     "target_path": target,
+                    "original_target_path": item.get("originalTargetPath") or item.get("original_target_path"),
                     "geo_exists": item.get("geo_exists"),
                     "status": item.get("status"),
                     "classification": item.get("classification"),

@@ -15,7 +15,7 @@ def _sftp_path(windows_path: str) -> str:
     return normalized
 
 
-def read_remote_geo_file(windows_path: str) -> bytes:
+def read_remote_file(windows_path: str) -> bytes:
     key = paramiko.Ed25519Key.from_private_key_file(settings.GEO_SFTP_KEY_PATH)
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -34,3 +34,7 @@ def read_remote_geo_file(windows_path: str) -> bytes:
                 return remote_file.read()
     finally:
         ssh.close()
+
+
+def read_remote_geo_file(windows_path: str) -> bytes:
+    return read_remote_file(windows_path)

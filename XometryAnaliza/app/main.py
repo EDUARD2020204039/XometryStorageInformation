@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from .agents import process_jobs
 from .bend_artifacts import artifact_path, read_bend_summary
-from .geo_files import read_remote_geo_file
+from .geo_files import read_remote_file, read_remote_geo_file
 from .metrics import observability_summary, prometheus_metrics
 from .store import find_job_by_offer_id, list_jobs, read_events
 from . import queue_store, settings
@@ -759,6 +759,7 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
         hole_count = preview_stats.get("holes", 0)
         point_count = preview_stats.get("points", 0)
         download_url = f"/api/agents/geo/{quote(offer_id, safe='')}/files/{item_index}"
+        view_url = f"/api/agents/geo/{quote(offer_id, safe='')}/files/{item_index}/view"
         cards.append(
             f"""
             <section class="viewer">
@@ -776,7 +777,10 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
                   </div>
                   <div class="viewer-meta">{html.escape(dimensions)} · {cut_count} contururi · {hole_count} gauri · {bend_count} indoituri · {point_count} puncte</div>
                 </div>
-                <a class="button" href="{download_url}">Descarca .geo</a>
+                <div class="viewer-actions">
+                  <a class="button" href="{view_url}" target="_blank" rel="noreferrer">2D + 3D</a>
+                  <a class="button secondary" href="{download_url}">Descarca .geo</a>
+                </div>
               </div>
               <div class="cad-frame">{preview_svg}</div>
             </section>
@@ -872,6 +876,12 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
       padding: 12px 16px;
       border-bottom: 1px solid #d9e2ec;
       background: #f8fafc;
+    }}
+    .viewer-actions {{
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }}
     .viewer-info {{
       flex: 1;
@@ -984,6 +994,106 @@ def geo_file(offer_id: str, item_index: int) -> Response:
     )
 
 
+def _norm_path(value: Any) -> str:
+    return str(value or "").replace("\\", "/").strip().lower()
+
+
+def _base_name_without_suffix(value: Any) -> str:
+    name = PureWindowsPath(str(value or "").replace("/", "\\")).name
+    return re.sub(r"\.(?:geo|stp|step)$", "", name, flags=re.IGNORECASE).lower()
+
+
+def _step_path_for_geo_item(state: dict[str, Any], item_index: int) -> str:
+    sheet = state.get("sheet_metal_laser") or {}
+    geo_items = sheet.get("geo_items") or []
+    if item_index < 0 or item_index >= len(geo_items):
+        raise HTTPException(status_code=404, detail="GEO item not found.")
+
+    item = geo_items[item_index]
+    target_path = str(item.get("target_path") or item.get("targetPath") or "")
+    part_name = str(item.get("part_name") or item.get("partName") or "")
+    target_norm = _norm_path(target_path)
+    target_base = _base_name_without_suffix(target_path)
+    part_base = _base_name_without_suffix(part_name)
+
+    result = sheet.get("ofertare_result") or {}
+    trutops = [entry for entry in result.get("trutops") or [] if isinstance(entry, dict)]
+    for entry in trutops:
+        entry_target = _norm_path(entry.get("targetPath") or entry.get("target_path") or entry.get("originalTargetPath") or entry.get("original_target_path"))
+        entry_part = _base_name_without_suffix(entry.get("partName") or entry.get("part_name") or "")
+        if not (
+            entry_target == target_norm
+            or (target_base and target_base == entry_part)
+            or (part_base and part_base == entry_part)
+        ):
+            continue
+        source_path = str(
+            entry.get("sourcePath")
+            or entry.get("source_path")
+            or entry.get("originalSourcePath")
+            or entry.get("original_source_path")
+            or ""
+        )
+        if source_path.lower().endswith((".stp", ".step")):
+            return source_path
+
+    for candidate in (item.get("source_path"), item.get("sourcePath"), item.get("original_source_path"), item.get("originalSourcePath")):
+        candidate = str(candidate or "")
+        if candidate.lower().endswith((".stp", ".step")):
+            return candidate
+
+    files = [str(path) for path in result.get("files") or []]
+    step_files = [path for path in files if path.lower().endswith((".stp", ".step"))]
+    if not step_files:
+        raise HTTPException(status_code=404, detail="No STEP file found for this GEO item.")
+
+    def score(path: str) -> tuple[int, int]:
+        base = _base_name_without_suffix(path)
+        value = 0
+        if target_base and (target_base in base or base in target_base):
+            value += 20
+        if part_base and (part_base in base or base in part_base):
+            value += 20
+        lowered = _norm_path(path)
+        if "/doc/" in lowered:
+            value += 5
+        if "/oferta/" in lowered:
+            value += 2
+        return value, -len(path)
+
+    best = max(step_files, key=score)
+    if score(best)[0] <= 0 and len(step_files) > 1:
+        raise HTTPException(status_code=404, detail="Could not match a STEP file to this GEO item.")
+    return best
+
+
+def _read_step_file(offer_id: str, item_index: int) -> tuple[str, bytes, str]:
+    state = find_job_by_offer_id(offer_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Offer not found in XometryAnaliza.")
+    step_path = _step_path_for_geo_item(state, item_index)
+    try:
+        content = read_remote_file(step_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Remote STEP file was not found.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not read remote STEP file: {type(exc).__name__}: {exc}") from exc
+    filename = PureWindowsPath(str(step_path)).name or f"{offer_id}-{item_index}.stp"
+    return step_path, content, filename
+
+
+@app.get("/api/agents/geo/{offer_id}/files/{item_index}/step")
+def geo_step_file(offer_id: str, item_index: int) -> Response:
+    _, content, filename = _read_step_file(offer_id, item_index)
+    return Response(
+        content,
+        media_type="model/step",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{quote(filename)}",
+        },
+    )
+
+
 @app.get("/api/agents/geo/{offer_id}/files/{item_index}/view")
 def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
     state, target_path, content, filename = _read_geo_file(offer_id, item_index)
@@ -1008,6 +1118,17 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
         if xometry_url
         else ""
     )
+    try:
+        step_path = _step_path_for_geo_item(state, item_index)
+        step_url = f"/api/agents/geo/{quote(offer_id, safe='')}/files/{item_index}/step"
+        step_status = "Se incarca modelul STEP..."
+    except HTTPException as exc:
+        step_path = ""
+        step_url = ""
+        step_status = str(exc.detail)
+    safe_step_path = html.escape(step_path or "Nu am gasit fisier STEP pentru aceasta piesa.")
+    safe_step_url = html.escape(step_url, quote=True)
+    safe_step_status = html.escape(step_status)
 
     return HTMLResponse(
         f"""<!doctype html>
@@ -1165,9 +1286,70 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
       cursor: pointer;
     }}
     .cad-frame {{
-      height: calc(100vh - 245px);
+      height: calc(100vh - 285px);
       min-height: 520px;
       background: #0b1120;
+    }}
+    .viewer-split {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-height: 520px;
+    }}
+    .viewer-pane {{
+      min-width: 0;
+      border-right: 1px solid #1e293b;
+      background: #0b1120;
+    }}
+    .viewer-pane:last-child {{
+      border-right: 0;
+    }}
+    .pane-label {{
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.20);
+      background: #111827;
+      color: #e5e7eb;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }}
+    .step-path {{
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 400;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 58%;
+    }}
+    .step-frame {{
+      position: relative;
+      height: calc(100vh - 285px);
+      min-height: 520px;
+      background:
+        radial-gradient(circle at 70% 25%, rgba(14, 165, 233, 0.18) 0, rgba(14, 165, 233, 0) 32%),
+        linear-gradient(145deg, #0f172a 0%, #050816 100%);
+    }}
+    .step-frame canvas {{
+      display: block;
+      width: 100%;
+      height: 100%;
+    }}
+    .step-status {{
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      color: #dbeafe;
+      font-size: 14px;
+      text-align: center;
+      z-index: 2;
+      pointer-events: none;
     }}
     .cad-empty {{
       display: flex;
@@ -1289,7 +1471,28 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }}
+    @media (max-width: 1100px) {{
+      .viewer-split {{
+        grid-template-columns: 1fr;
+      }}
+      .viewer-pane {{
+        border-right: 0;
+        border-bottom: 1px solid #1e293b;
+      }}
+      .viewer-pane:last-child {{
+        border-bottom: 0;
+      }}
+    }}
   </style>
+  <script type="importmap">
+    {{
+      "imports": {{
+        "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+      }}
+    }}
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/occt-import-js.js"></script>
 </head>
 <body>
   <header>
@@ -1327,7 +1530,18 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
           <button class="icon-button" type="button" data-geo-zoom="fit" title="Fit">Fit</button>
         </div>
       </div>
-      <div class="cad-frame">{safe_preview_svg}</div>
+      <div class="viewer-split">
+        <div class="viewer-pane">
+          <div class="pane-label"><span>Desfasurata GEO 2D</span></div>
+          <div class="cad-frame">{safe_preview_svg}</div>
+        </div>
+        <div class="viewer-pane">
+          <div class="pane-label"><span>Vedere 3D STEP</span><span class="step-path" title="{safe_step_path}">{safe_step_path}</span></div>
+          <div id="step-viewer" class="step-frame" data-step-url="{safe_step_url}">
+            <div id="step-status" class="step-status">{safe_step_status}</div>
+          </div>
+        </div>
+      </div>
     </section>
     <details>
       <summary>Arata continut raw .geo</summary>
@@ -1393,6 +1607,146 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
         }});
       }});
     }})();
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import {{ OrbitControls }} from 'three/addons/controls/OrbitControls.js';
+
+    const container = document.getElementById('step-viewer');
+    const status = document.getElementById('step-status');
+    const stepUrl = container?.dataset.stepUrl || '';
+
+    const setStatus = (text, persistent = false) => {{
+      if (!status) return;
+      status.textContent = text;
+      status.style.display = persistent ? 'flex' : 'none';
+    }};
+
+    const flatten = (array) => {{
+      if (!Array.isArray(array)) return [];
+      return Array.isArray(array[0]) ? array.flat() : array;
+    }};
+
+    async function loadStepViewer() {{
+      if (!container || !status || !stepUrl) {{
+        setStatus(status?.textContent || 'Nu exista STEP pentru acest reper.', true);
+        return;
+      }}
+      try {{
+        setStatus('Incarc STEP si convertesc in 3D...', true);
+        const [occt, response] = await Promise.all([
+          window.occtimportjs({{
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/${{file}}`
+          }}),
+          fetch(stepUrl)
+        ]);
+        if (!response.ok) {{
+          throw new Error(`STEP HTTP ${{response.status}}`);
+        }}
+        const buffer = await response.arrayBuffer();
+        const result = occt.ReadStepFile(new Uint8Array(buffer), {{
+          linearUnit: 'millimeter',
+          linearDeflectionType: 'bounding_box_ratio',
+          linearDeflection: 0.0015,
+          angularDeflection: 0.4
+        }});
+        if (!result?.success || !Array.isArray(result.meshes) || !result.meshes.length) {{
+          throw new Error('STEP-ul nu a produs mesh 3D.');
+        }}
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x08111f);
+        const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        container.appendChild(renderer.domElement);
+
+        const camera = new THREE.PerspectiveCamera(35, container.clientWidth / Math.max(container.clientHeight, 1), 0.1, 100000);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+
+        scene.add(new THREE.HemisphereLight(0xdbeafe, 0x0f172a, 1.15));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+        keyLight.position.set(2, 3, 4);
+        scene.add(keyLight);
+        const rimLight = new THREE.DirectionalLight(0x60a5fa, 0.65);
+        rimLight.position.set(-4, 2, -2);
+        scene.add(rimLight);
+
+        const group = new THREE.Group();
+        scene.add(group);
+        for (const mesh of result.meshes) {{
+          const geometry = new THREE.BufferGeometry();
+          const positions = flatten(mesh?.attributes?.position?.array);
+          if (!positions.length) continue;
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+          const normals = flatten(mesh?.attributes?.normal?.array);
+          if (normals.length === positions.length) {{
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+          }}
+          const indices = flatten(mesh?.index?.array);
+          if (indices.length) {{
+            geometry.setIndex(indices);
+          }}
+          geometry.computeVertexNormals();
+          const color = Array.isArray(mesh.color) ? new THREE.Color(mesh.color[0], mesh.color[1], mesh.color[2]) : new THREE.Color(0xb8c7d9);
+          const material = new THREE.MeshStandardMaterial({{
+            color,
+            metalness: 0.18,
+            roughness: 0.52,
+            side: THREE.DoubleSide
+          }});
+          const solid = new THREE.Mesh(geometry, material);
+          group.add(solid);
+          const edges = new THREE.LineSegments(
+            new THREE.EdgesGeometry(geometry, 35),
+            new THREE.LineBasicMaterial({{ color: 0x1e293b, transparent: true, opacity: 0.42 }})
+          );
+          group.add(edges);
+        }}
+
+        const box = new THREE.Box3().setFromObject(group);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(center);
+        group.position.sub(center);
+        const maxDim = Math.max(size.x, size.y, size.z, 1);
+        camera.position.set(maxDim * 0.9, -maxDim * 1.25, maxDim * 0.75);
+        camera.near = maxDim / 1000;
+        camera.far = maxDim * 20;
+        camera.updateProjectionMatrix();
+        controls.target.set(0, 0, 0);
+        controls.update();
+
+        const grid = new THREE.GridHelper(maxDim * 1.8, 16, 0x334155, 0x1e293b);
+        grid.rotation.x = Math.PI / 2;
+        grid.position.z = -size.z / 2 - maxDim * 0.04;
+        scene.add(grid);
+
+        setStatus('', false);
+        const resize = () => {{
+          const width = Math.max(container.clientWidth, 1);
+          const height = Math.max(container.clientHeight, 1);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+          renderer.setSize(width, height);
+        }};
+        window.addEventListener('resize', resize);
+        const animate = () => {{
+          controls.update();
+          renderer.render(scene, camera);
+          requestAnimationFrame(animate);
+        }};
+        animate();
+      }} catch (error) {{
+        setStatus(`Nu pot afisa 3D: ${{error?.message || error}}`, true);
+      }}
+    }}
+
+    loadStepViewer();
   </script>
 </body>
 </html>"""
