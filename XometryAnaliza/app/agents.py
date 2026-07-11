@@ -111,6 +111,22 @@ def _result_text(result: dict[str, Any]) -> str:
     return "\n".join(warnings + trutops).lower()
 
 
+def _ofertare_log_lines(result: dict[str, Any], limit: int = 80) -> list[str]:
+    lines: list[str] = []
+    for item in result.get("warnings") or []:
+        for line in str(item or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if "password" in lowered or "token" in lowered:
+                continue
+            lines.append(line[:600])
+            if len(lines) >= limit:
+                return lines
+    return lines
+
+
 def _read_capture_hint(result: dict[str, Any]) -> str:
     for file_path in result.get("files") or []:
         path = str(file_path or "")
@@ -299,6 +315,8 @@ class SheetMetalLaserAgent:
                 append_event("sheet.retry_folder", f"Retrying TecZone on existing folder for {job_id}", job_id=job_id, offer_id=offer_id, project_root=previous_project)
             else:
                 result = run_ofertare_automata(job)
+            for log_line in _ofertare_log_lines(result):
+                append_event("ofertare.log", log_line, job_id=job_id, offer_id=offer_id)
             raw_geo_items = extract_geo_items(result)
             geo_items = _filter_geo_items_for_sheet_parts(job, raw_geo_items)
             failure = _classify_ofertare_failure(result)
