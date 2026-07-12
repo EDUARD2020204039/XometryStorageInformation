@@ -20,6 +20,13 @@ from . import queue_store, settings
 
 app = FastAPI(title="Xometry Analiza Agents", version="2.0.0")
 
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <path d="M15 15l34 34M49 15L15 49" stroke="#38bdf8" stroke-width="8" stroke-linecap="round"/>
+  <path d="M12 44h40" stroke="#f97316" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="50" cy="44" r="5" fill="#facc15"/>
+  <path d="M47 44h10" stroke="#f97316" stroke-width="2" stroke-linecap="round"/>
+</svg>"""
 
 @app.on_event("startup")
 def start_queue_worker() -> None:
@@ -130,6 +137,16 @@ def _manual_job_from_payload(payload: ManualJobPayload) -> dict[str, Any]:
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "service": "xometry-analiza-agents"}
+
+
+@app.get("/favicon.svg")
+def favicon_svg() -> Response:
+    return Response(FAVICON_SVG, media_type="image/svg+xml")
+
+
+@app.get("/favicon.ico")
+def favicon_ico() -> Response:
+    return Response(FAVICON_SVG, media_type="image/svg+xml")
 
 
 @app.get("/metrics")
@@ -331,6 +348,7 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Istoric XometryAnaliza</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
     body{{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}}
     header{{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 26px;background:#111827;color:white}}
@@ -423,6 +441,7 @@ def dashboard() -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>XometryAnaliza Queue</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
     body{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}
     header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 20px;background:#111827;color:white}
@@ -876,6 +895,7 @@ def xometry_log_view(offer_id: str) -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Log Xometry - {html.escape(job_id)}</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
     body{{margin:0;background:#f4f7fb;color:#172033;font-family:Arial,sans-serif}}
     header{{padding:20px 24px;background:#111827;color:white}}
@@ -960,6 +980,7 @@ def project_status_view(offer_id: str) -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dosar activ - {html.escape(job_id)}</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
     body{{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}}
     header{{padding:22px 26px;background:#111827;color:white}}
@@ -1063,6 +1084,7 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Desfasurate GEO - {html.escape(job_id)}</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
     body{{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}}
     header{{padding:28px 32px;background:#111827;color:white}}
@@ -1149,6 +1171,7 @@ def geo_all_view(offer_id: str) -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Desfasurate GEO - {html.escape(job_id)}</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
     body {{
       margin: 0;
@@ -1486,6 +1509,7 @@ def geo_file_view(offer_id: str, item_index: int) -> HTMLResponse:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{safe_title}</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <style>
     body {{
       margin: 0;
