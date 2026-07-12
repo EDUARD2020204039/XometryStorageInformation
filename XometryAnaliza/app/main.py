@@ -15,7 +15,7 @@ from .bend_artifacts import artifact_path, read_bend_summary
 from .geo_files import read_remote_file, read_remote_geo_file
 from .metrics import observability_summary, prometheus_metrics
 from .store import find_job_by_offer_id, list_jobs, read_events
-from . import queue_store, settings
+from . import queue_store, settings, watchdog
 
 
 app = FastAPI(title="Xometry Analiza Agents", version="2.0.0")
@@ -31,6 +31,7 @@ FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 @app.on_event("startup")
 def start_queue_worker() -> None:
     queue_store.recover_and_start()
+    watchdog.start()
 
 
 class AgentJobsPayload(BaseModel):
@@ -524,6 +525,9 @@ def dashboard() -> HTMLResponse:
     .session .state{font-size:18px;font-weight:800}.session .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}
     .session .check{font-size:12px;border:1px solid #d9e2ec;border-radius:4px;padding:6px;background:#f8fafc}
     .session .check.yes{border-color:#86efac;background:#f0fdf4;color:#166534}.session .check.no{border-color:#fecaca;background:#fff1f2;color:#991b1b}
+    .watchdog{border-left:5px solid #94a3b8}.watchdog.ok{border-left-color:#16a34a}.watchdog.warning{border-left-color:#f59e0b}.watchdog.error{border-left-color:#dc2626}
+    .scenario{display:flex;justify-content:space-between;gap:8px;border-top:1px solid #eef2f7;padding:7px 0;font-size:12px}
+    .scenario:first-of-type{border-top:0}.scenario strong{font-size:13px}.scenario .mark{font-weight:800}.scenario.ok .mark{color:#166534}.scenario.warning .mark{color:#92400e}.scenario.error .mark{color:#991b1b}
     @media(max-width:900px){main{grid-template-columns:1fr}}
   </style>
 </head>
@@ -542,6 +546,7 @@ def dashboard() -> HTMLResponse:
           <div id="manualResult" class="result"></div>
         </div>
       </section>
+      <section id="watchdogStatus" style="margin-top:16px"></section>
       <section id="xometrySession" style="margin-top:16px"></section>
       <section id="active" style="margin-top:16px"></section>
       <section style="margin-top:16px"><h2>Logs</h2><div id="logs" class="panel log"></div></section>
@@ -623,6 +628,22 @@ def dashboard() -> HTMLResponse:
         (session.body_sample && !ok ? `<div class="meta bad">${esc(session.body_sample).slice(0,260)}</div>` : '') +
         `</div>`;
     }
+    function renderWatchdog(status){
+      status = status || {};
+      const scenarios = status.scenarios || [];
+      const cls = status.status || (status.ok ? 'ok' : 'error');
+      const rows = scenarios.map(item => {
+        const rowCls = item.status || (item.ok ? 'ok' : 'error');
+        return `<div class="scenario ${esc(rowCls)}"><div><strong>${esc(item.name)}</strong><div class="meta">${esc(item.summary || '')}</div></div><div class="mark">${item.ok ? 'OK' : esc(String(item.status || 'EROARE').toUpperCase())}</div></div>`;
+      }).join('') || '<div class="meta">Nu a rulat inca.</div>';
+      document.getElementById('watchdogStatus').innerHTML =
+        `<h2>Watchdog</h2><div class="panel watchdog ${esc(cls)}">` +
+        `<div class="state">${status.ok ? 'Totul OK' : 'Necesita atentie'}</div>` +
+        `<div class="meta">${esc(status.summary || 'Watchdog nu a rulat inca.')} · verificat: ${fmtAge(status.checked_at ? ((Date.now()/1000) - Number(status.checked_at)) : 0)}</div>` +
+        `<div style="margin-top:8px"><a class="button" href="/api/watchdog/view" target="_blank" rel="noreferrer">Detalii watchdog</a></div>` +
+        `<div style="margin-top:8px">${rows}</div>` +
+        `</div>`;
+    }
     async function move(id, direction){ await api('/api/queue/'+encodeURIComponent(id)+'/move',{method:'POST',body:JSON.stringify({direction})}); refresh(); }
     async function position(id, el){ await api('/api/queue/'+encodeURIComponent(id)+'/priority',{method:'POST',body:JSON.stringify({priority:Number(el.value||1)})}); refresh(); }
     async function submitManual(event){
@@ -651,7 +672,8 @@ def dashboard() -> HTMLResponse:
       const id = esc(item.job_id);
       return `<div class="job"><div><div class="id">${jobName(item, `${i+1}. `)}</div><div class="meta">${title}</div><div class="meta">${esc(item.offer_id||'')} ${esc(item.source||'')}</div></div><div class="actions"><input type="number" min="1" value="${i+1}" onchange="position('${id}',this)"><button onclick="move('${id}','up')">Up</button><button onclick="move('${id}','down')">Down</button></div></div>`;
     }
-    function renderDashboard(data, logs, xometrySession){
+    function renderDashboard(data, logs, xometrySession, watchdogStatus){
+      renderWatchdog(watchdogStatus || {});
       renderXometrySession(xometrySession || {});
       const paused = data.paused;
       const pauseUntil = data.paused_until ? new Date(data.paused_until * 1000).toLocaleTimeString() : '';
@@ -666,7 +688,7 @@ def dashboard() -> HTMLResponse:
     }
     async function refresh(){
       const payload = await api('/api/queue/live');
-      renderDashboard(payload.queue || payload, {items: payload.logs || []}, payload.xometry_session || {});
+      renderDashboard(payload.queue || payload, {items: payload.logs || []}, payload.xometry_session || {}, payload.watchdog || {});
     }
     let fallbackTimer = null;
     function startFallback(){
@@ -688,7 +710,7 @@ def dashboard() -> HTMLResponse:
       source.addEventListener('snapshot', event => {
         try {
           const payload = JSON.parse(event.data);
-          renderDashboard(payload.queue || {}, {items: payload.logs || []}, payload.xometry_session || {});
+          renderDashboard(payload.queue || {}, {items: payload.logs || []}, payload.xometry_session || {}, payload.watchdog || {});
           stopFallback();
         } catch (err) {
           startFallback();
@@ -718,6 +740,111 @@ def xometry_session() -> dict[str, Any]:
 @app.post("/api/xometry/session")
 def update_xometry_session(payload: XometrySessionPayload) -> dict[str, Any]:
     return {"session": _write_xometry_session(payload.dict())}
+
+
+@app.get("/api/watchdog")
+def watchdog_status() -> dict[str, Any]:
+    return watchdog.latest_status()
+
+
+@app.post("/api/watchdog/run")
+def watchdog_run() -> dict[str, Any]:
+    return watchdog.run_checks(source="manual")
+
+
+@app.get("/api/watchdog/history")
+def watchdog_history(limit: int = 50) -> dict[str, Any]:
+    return {"items": watchdog.history(limit)}
+
+
+@app.get("/api/watchdog/view", response_class=HTMLResponse)
+def watchdog_view() -> HTMLResponse:
+    current = watchdog.latest_status()
+    recent = watchdog.history(30)
+
+    def scenario_rows(payload: dict[str, Any]) -> str:
+        rows = []
+        for item in payload.get("scenarios") or []:
+            status = str(item.get("status") or ("ok" if item.get("ok") else "error"))
+            details = html.escape(json.dumps(item.get("details") or {}, ensure_ascii=False, indent=2))
+            rows.append(
+                f"<tr class=\"{html.escape(status)}\">"
+                f"<td><strong>{html.escape(str(item.get('name') or ''))}</strong></td>"
+                f"<td>{html.escape(status.upper())}</td>"
+                f"<td>{html.escape(str(item.get('summary') or ''))}<pre>{details}</pre></td>"
+                f"</tr>"
+            )
+        return "".join(rows) or '<tr><td colspan="3">Nu exista scenarii rulate.</td></tr>'
+
+    history_rows = []
+    for item in reversed(recent):
+        failed = [sc for sc in item.get("scenarios") or [] if not sc.get("ok")]
+        failed_text = ", ".join(str(sc.get("name")) for sc in failed) if failed else "-"
+        ts = float(item.get("checked_at") or 0)
+        history_rows.append(
+            f"<tr>"
+            f"<td data-ts=\"{ts}\"></td>"
+            f"<td><span class=\"badge {html.escape(str(item.get('status') or 'unknown'))}\">{html.escape(str(item.get('status') or 'unknown'))}</span></td>"
+            f"<td>{html.escape(str(item.get('summary') or ''))}</td>"
+            f"<td>{html.escape(failed_text)}</td>"
+            f"</tr>"
+        )
+    history_html = "".join(history_rows) or '<tr><td colspan="4">Nu exista istoric.</td></tr>'
+    return HTMLResponse(f"""<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watchdog XometryAnaliza</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    body{{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}}
+    header{{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:20px 24px;background:#111827;color:white}}
+    h1{{margin:0;font-size:24px}} main{{padding:18px 22px;display:grid;gap:16px}}
+    .button{{display:inline-flex;align-items:center;min-height:34px;padding:0 12px;border:1px solid #1677ff;border-radius:5px;background:#1677ff;color:white;text-decoration:none;font-weight:700;cursor:pointer}}
+    .secondary{{background:white;color:#0958d9}}
+    table{{width:100%;border-collapse:collapse;background:white;border:1px solid #d9e2ec;border-radius:8px;overflow:hidden}}
+    th,td{{padding:10px 12px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top;font-size:14px}}
+    th{{background:#f8fafc;color:#52606d;text-transform:uppercase;font-size:12px}}
+    pre{{white-space:pre-wrap;font:12px/1.35 Consolas,monospace;color:#52606d;background:#f8fafc;border:1px solid #e5eaf0;border-radius:6px;padding:8px;max-height:220px;overflow:auto}}
+    .ok td{{background:#f0fdf4}} .warning td{{background:#fffbeb}} .error td{{background:#fff1f2}}
+    .badge{{display:inline-flex;border-radius:999px;padding:3px 8px;font-weight:800;font-size:12px;background:#e2e8f0}}
+    .badge.ok{{background:#dcfce7;color:#166534}} .badge.warning{{background:#fef3c7;color:#92400e}} .badge.error{{background:#fee2e2;color:#991b1b}}
+    .summary{{padding:14px 16px;border:1px solid #d9e2ec;border-radius:8px;background:white}}
+    .summary.ok{{border-left:5px solid #16a34a}} .summary.warning{{border-left:5px solid #f59e0b}} .summary.error{{border-left:5px solid #dc2626}}
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>Watchdog XometryAnaliza</h1><div>Scenarii periodice de control</div></div>
+    <div><a class="button secondary" href="/">Inapoi la QA</a> <button class="button" onclick="runNow()">Ruleaza acum</button></div>
+  </header>
+  <main>
+    <section class="summary {html.escape(str(current.get('status') or 'unknown'))}">
+      <strong>{html.escape(str(current.get('summary') or 'Watchdog nu a rulat inca.'))}</strong>
+      <div>Ultima verificare: <span data-ts="{float(current.get('checked_at') or 0)}"></span></div>
+    </section>
+    <section>
+      <h2>Scenarii curente</h2>
+      <table><thead><tr><th>Scenariu</th><th>Status</th><th>Detalii</th></tr></thead><tbody>{scenario_rows(current)}</tbody></table>
+    </section>
+    <section>
+      <h2>Istoric recent</h2>
+      <table><thead><tr><th>Ora</th><th>Status</th><th>Rezumat</th><th>Picate</th></tr></thead><tbody>{history_html}</tbody></table>
+    </section>
+  </main>
+  <script>
+    document.querySelectorAll('[data-ts]').forEach(el => {{
+      const ts = Number(el.dataset.ts || 0);
+      el.textContent = ts ? new Date(ts * 1000).toLocaleString() : '-';
+    }});
+    async function runNow() {{
+      await fetch('/api/watchdog/run', {{method:'POST'}});
+      location.reload();
+    }}
+  </script>
+</body>
+</html>""")
 
 
 def _compact_queue_item(item: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -786,7 +913,12 @@ def _compact_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @app.get("/api/queue/live")
 def queue_live() -> dict[str, Any]:
-    return {"queue": _queue_live_state(), "logs": _compact_events(read_events(20)), "xometry_session": _read_xometry_session()}
+    return {
+        "queue": _queue_live_state(),
+        "logs": _compact_events(read_events(20)),
+        "xometry_session": _read_xometry_session(),
+        "watchdog": watchdog.latest_status(),
+    }
 
 
 @app.get("/api/queue/stream")
@@ -798,6 +930,7 @@ def queue_stream() -> StreamingResponse:
                 "queue": _queue_live_state(),
                 "logs": _compact_events(read_events(20)),
                 "xometry_session": _read_xometry_session(),
+                "watchdog": watchdog.latest_status(),
             }
             text = json.dumps(snapshot, ensure_ascii=False, default=str)
             if text != last_payload:
@@ -890,6 +1023,8 @@ def mcp_tools(x_mcp_token: str | None = Header(default=None)) -> dict[str, Any]:
             "queue.reorder": {"job_ids": ["HJO-1", "J-2"]},
             "queue.submit": {"source": "hermes", "jobs": []},
             "queue.submit_manual": {"identifier": "URL, offer id, HJO-..., J-... or RFQ URL", "force": True, "front": True},
+            "watchdog.status": {},
+            "watchdog.run": {},
         },
     }
 
@@ -921,6 +1056,10 @@ def mcp(payload: dict[str, Any] = Body(default_factory=dict), x_mcp_token: str |
         )
         job = _manual_job_from_payload(manual)
         result = {"job": job, **queue_store.enqueue_jobs([job], manual.source, force=manual.force, front=manual.front)}
+    elif method == "watchdog.status":
+        result = watchdog.latest_status()
+    elif method == "watchdog.run":
+        result = watchdog.run_checks(source="mcp")
     else:
         raise HTTPException(status_code=400, detail=f"Unknown MCP method: {method}")
     return {"jsonrpc": "2.0", "id": payload.get("id"), "result": result}
