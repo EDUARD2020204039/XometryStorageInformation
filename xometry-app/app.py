@@ -376,6 +376,11 @@ def _offer_public_url(offer: Offer) -> str:
     return f"/offer/{offer.id}"
 
 
+def _offer_xometry_url(offer: Offer) -> str:
+    title = _normalize_offer_title(offer.title, offer.offer_id, offer.url)
+    return _normalize_xometry_offer_url(offer.url, offer.offer_id, title)
+
+
 def _dosar_display_name(dosar_id: str | None, dosar_path: str | None) -> str | None:
     if dosar_path:
         normalized = str(dosar_path).replace("\\", "/").rstrip("/")
@@ -393,7 +398,7 @@ def _offer_dosar_payload(offer: Offer, reason: str = "") -> dict:
         "id": offer.id,
         "offer_id": offer.offer_id,
         "title": _normalize_offer_title(offer.title, offer.offer_id, offer.url),
-        "url": offer.url,
+        "url": _offer_xometry_url(offer),
         "backend_url": _offer_public_url(offer),
         "dosar_id": offer.dosar_id,
         "dosar_name": dosar_name,
@@ -967,7 +972,7 @@ async def export_xlsx(offer_id: int, db: Session = Depends(get_db)):
                 'Valoare': offer.customer or ''
             }, {
                 'Câmp': 'URL',
-                'Valoare': offer.url
+                'Valoare': _offer_xometry_url(offer)
             }, {
                 'Câmp': 'Data creării',
                 'Valoare': offer.created_at.strftime('%Y-%m-%d %H:%M:%S')
@@ -997,7 +1002,7 @@ async def get_offers(db: Session = Depends(get_db)):
             'offer_id': offer.offer_id,
             'title': _normalize_offer_title(offer.title, offer.offer_id, offer.url),
             'customer': offer.customer,
-            'url': offer.url,
+            'url': _offer_xometry_url(offer),
             'created_at': offer.created_at.isoformat(),
             'parts_count': len(offer.parts),
             'dosar_id': offer.dosar_id,
@@ -1091,7 +1096,12 @@ async def create_xometry_dosar(
         offer = _find_offer_by_external_id(db, external_offer_id)
         if not offer:
             title = payload.get("job_name") or payload.get("title") or f"Xometry {external_offer_id}"
-            url = payload.get("url") or f"https://partner.xometry.eu/offers/{external_offer_id}"
+            normalized_title = _normalize_offer_title(title, external_offer_id, payload.get("url"))
+            url = _normalize_xometry_offer_url(
+                payload.get("url") or f"https://partner.xometry.eu/offers/{external_offer_id}",
+                external_offer_id,
+                normalized_title,
+            )
             offer = Offer(
                 offer_id=str(external_offer_id),
                 title=title,
@@ -1131,7 +1141,11 @@ async def create_xometry_dosar(
             "offer_id": str(external_offer_id),
             "job_id": payload.get("job_name") or payload.get("title"),
             "part_ids": [str(item.get("part_id")) for item in payload.get("parts") or [] if item.get("part_id")],
-            "url": payload.get("url") or offer.url,
+            "url": _normalize_xometry_offer_url(
+                payload.get("url") or offer.url,
+                offer.offer_id,
+                _normalize_offer_title(offer.title, offer.offer_id, offer.url),
+            ),
         }
         result = DosarService().allocate_dosar(offer.offer_id, offer.title, metadata=metadata)
         if not result.get("success"):
