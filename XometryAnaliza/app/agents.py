@@ -284,6 +284,8 @@ class SheetMetalLaserAgent:
             save_job_state(job_id, previous)
             append_event("sheet.stale_running", f"Sheet agent found stale running state and will retry {job_id}", job_id=job_id, offer_id=offer_id)
         if (
+            not job.get("force_agent")
+            and
             last_status not in ("agent_busy", "running")
             and last_attempt_ts
             and time.time() - float(last_attempt_ts) < settings.SHEET_AGENT_RETRY_SECONDS

@@ -518,7 +518,12 @@ def _worker_loop() -> None:
         job_id = item["job_id"]
         append_event("queue.start", f"Started queued job {job_id}", job_id=job_id, offer_id=item.get("offer_id"))
         try:
-            result = process_job(item["job"])
+            job_payload = {
+                **(item.get("job") or {}),
+                "force_agent": bool(item.get("force")),
+                "queue_source": item.get("source"),
+            }
+            result = process_job(job_payload)
             delay_seconds = _finish(item, result=result)
             if _sheet_status(result) == "agent_busy":
                 append_event("queue.agent_busy", f"TecZone busy; paused queue for {job_id}", job_id=job_id, offer_id=item.get("offer_id"), retry_seconds=delay_seconds)
