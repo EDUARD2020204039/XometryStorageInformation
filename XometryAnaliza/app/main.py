@@ -1,11 +1,13 @@
 import html
+import json
 import re
+import time
 from typing import Any
 from pathlib import PureWindowsPath
 from urllib.parse import quote
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Body, Header
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agents import process_jobs
@@ -528,8 +530,7 @@ def dashboard() -> HTMLResponse:
       const id = esc(item.job_id);
       return `<div class="job"><div><div class="id">${jobName(item, `${i+1}. `)}</div><div class="meta">${title}</div><div class="meta">${esc(item.offer_id||'')} ${esc(item.source||'')}</div></div><div class="actions"><input type="number" min="1" value="${i+1}" onchange="position('${id}',this)"><button onclick="move('${id}','up')">Up</button><button onclick="move('${id}','down')">Down</button></div></div>`;
     }
-    async function refresh(){
-      const data = await api('/api/queue');
+    function renderDashboard(data, logs){
       const paused = data.paused;
       const pauseUntil = data.paused_until ? new Date(data.paused_until * 1000).toLocaleTimeString() : '';
       document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'laptop lucreaza':paused?'Dorina ocupata':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
@@ -539,10 +540,44 @@ def dashboard() -> HTMLResponse:
       const pausedHtml = pausedItem ? `<div class="id">${jobName(pausedItem)}</div><div class="meta">${esc(data.pause_reason||'')}</div>${progressHtml(pausedItem)}${projectButton(pausedItem)}` : idleText;
       document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${jobName(active)}</div><div class="meta">${esc(active.title||'')}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>${progressHtml(active)}${projectButton(active)}`:pausedHtml}</div>`;
       document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi sheet/laser in asteptare.</div>';
-      const logs = await api('/api/agents/logs?limit=20');
       document.getElementById('logs').textContent = (logs.items||[]).reverse().map(x => `${new Date((x.ts||0)*1000).toLocaleTimeString()} ${x.type}: ${x.message}`).join('\\n');
     }
-    refresh(); setInterval(refresh, 5000);
+    async function refresh(){
+      const payload = await api('/api/queue/live');
+      renderDashboard(payload.queue || payload, {items: payload.logs || []});
+    }
+    let fallbackTimer = null;
+    function startFallback(){
+      if (!fallbackTimer) fallbackTimer = setInterval(refresh, 5000);
+    }
+    function stopFallback(){
+      if (fallbackTimer) {
+        clearInterval(fallbackTimer);
+        fallbackTimer = null;
+      }
+    }
+    function startLiveStream(){
+      if (!window.EventSource) {
+        refresh();
+        startFallback();
+        return;
+      }
+      const source = new EventSource('/api/queue/stream');
+      source.addEventListener('snapshot', event => {
+        try {
+          const payload = JSON.parse(event.data);
+          renderDashboard(payload.queue || {}, {items: payload.logs || []});
+          stopFallback();
+        } catch (err) {
+          startFallback();
+        }
+      });
+      source.onerror = () => {
+        startFallback();
+      };
+      refresh();
+    }
+    startLiveStream();
   </script>
 </body>
 </html>""")
@@ -551,6 +586,100 @@ def dashboard() -> HTMLResponse:
 @app.get("/api/queue")
 def queue_status() -> dict[str, Any]:
     return queue_store.get_queue_state()
+
+
+def _compact_queue_item(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not item:
+        return None
+    keys = (
+        "job_id",
+        "offer_id",
+        "title",
+        "url",
+        "source",
+        "priority",
+        "status",
+        "started_ts",
+        "project_root",
+        "project_name",
+        "agent_status",
+        "error",
+        "failure_action",
+        "failure_type",
+        "identified_parts_count",
+        "processed_parts_count",
+        "geo_ready_count",
+        "geo_requested_count",
+        "analysis_started_ts",
+        "analysis_completed_ts",
+        "analysis_elapsed_seconds",
+        "process_duration_seconds",
+    )
+    return {key: item.get(key) for key in keys if key in item}
+
+
+def _queue_live_state() -> dict[str, Any]:
+    state = queue_store.get_queue_state()
+    return {
+        "active": _compact_queue_item(state.get("active")),
+        "paused_item": _compact_queue_item(state.get("paused_item")),
+        "queued": [_compact_queue_item(item) for item in state.get("queued") or []],
+        "running": bool(state.get("running")),
+        "worker_alive": bool(state.get("worker_alive")),
+        "queued_count": int(state.get("queued_count") or 0),
+        "completed_count": int(state.get("completed_count") or 0),
+        "paused": bool(state.get("paused")),
+        "paused_until": state.get("paused_until") or 0,
+        "pause_reason": state.get("pause_reason") or "",
+        "last_process_seconds": state.get("last_process_seconds") or 0,
+    }
+
+
+def _compact_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "ts": item.get("ts"),
+            "type": item.get("type"),
+            "message": item.get("message"),
+            "job_id": item.get("job_id"),
+            "offer_id": item.get("offer_id"),
+        }
+        for item in events
+    ]
+
+
+@app.get("/api/queue/live")
+def queue_live() -> dict[str, Any]:
+    return {"queue": _queue_live_state(), "logs": _compact_events(read_events(20))}
+
+
+@app.get("/api/queue/stream")
+def queue_stream() -> StreamingResponse:
+    def events():
+        last_payload = ""
+        while True:
+            snapshot = {
+                "queue": _queue_live_state(),
+                "logs": _compact_events(read_events(20)),
+            }
+            text = json.dumps(snapshot, ensure_ascii=False, default=str)
+            if text != last_payload:
+                payload = {"ts": time.time(), **snapshot}
+                yield f"event: snapshot\ndata: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+                last_payload = text
+            else:
+                yield f": heartbeat {int(time.time())}\n\n"
+            time.sleep(2)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/api/queue/{job_id}/priority")
