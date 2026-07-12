@@ -195,7 +195,8 @@ def _build_offer_link(offer_id=None, job_id=None, prefer_job_id=False):
     if prefer_job_id and canonical_job_id:
         if canonical_job_id.startswith("RFQ-"):
             return f"https://partner.xometry.eu/rfqs/{_rfq_url_slug(canonical_job_id)}?source=rfqs"
-        return f"https://partner.xometry.eu/offers/{canonical_job_id}"
+        if not offer_id:
+            return f"https://partner.xometry.eu/offers/{canonical_job_id}"
 
     if offer_id:
         if is_gsh_job:
@@ -275,7 +276,6 @@ def _resolve_offer_identity_from_page(page: Page, job):
         "link": _build_offer_link(
             offer_id=job.get("offer_id"),
             job_id=resolved_job_id,
-            prefer_job_id=True,
         ),
     }
 
@@ -858,7 +858,6 @@ def build_offer_payload(page: Page, job):
     canonical_link = _build_offer_link(
         offer_id=offer_id,
         job_id=resolved_job_id,
-        prefer_job_id=bool(_extract_canonical_job_id(resolved_job_id)),
     )
 
     parts = _extract_parts_from_page(page)

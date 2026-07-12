@@ -6,6 +6,12 @@ import time
 import config
 
 
+def _is_bad_gsh_link(link, job_id):
+    text = str(link or "")
+    job_text = str(job_id or "")
+    return bool(job_text.startswith(("HJO-", "J-")) and f"/offers/{job_text}" in text)
+
+
 def send_to_backend(jobs):
     if not config.BACKEND_ENABLED:
         return False, "Backend disabled"
@@ -30,10 +36,13 @@ def send_to_backend(jobs):
             url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
         else:
             url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
+        link = job.get("link")
+        if _is_bad_gsh_link(link, job_id_text):
+            link = ""
         offers.append({
             "offer_id": str(offer_id),
             "title": job_id,
-            "url": job.get("link") or url_fallback,
+            "url": link or url_fallback,
             "price": job.get("price"),
             "currency": config.MIN_PRICE_CURRENCY,
             "quantity": job.get("quantity"),

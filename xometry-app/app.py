@@ -313,6 +313,20 @@ def _normalize_offer_title(
     return str(offer_external_id or "")
 
 
+def _normalize_xometry_offer_url(
+    raw_url: Optional[str],
+    offer_external_id: Optional[str],
+    normalized_title: Optional[str],
+) -> str:
+    offer_id = str(offer_external_id or "").strip()
+    title = str(normalized_title or "").strip().upper()
+    if offer_id.isdigit() and title.startswith(("HJO-", "J-")):
+        return f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
+    if offer_id.isdigit() and raw_url and re.search(r"/offers/(?:HJO|J)-", raw_url, re.IGNORECASE):
+        return f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
+    return str(raw_url or "").strip()
+
+
 def _job_tokens(value: Optional[str]) -> list[str]:
     text = (value or "").upper()
     tokens = []
@@ -1234,6 +1248,7 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
             offer_external_id,
             offer_url,
         )
+        offer_url = _normalize_xometry_offer_url(offer_url, offer_external_id, normalized_title)
         
         logger.info(f"Primit date de la extensie pentru oferta: {offer_external_id}")
 
