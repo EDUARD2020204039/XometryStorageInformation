@@ -651,6 +651,10 @@ def _queue_live_state() -> dict[str, Any]:
         "paused_until": state.get("paused_until") or 0,
         "pause_reason": state.get("pause_reason") or "",
         "last_process_seconds": state.get("last_process_seconds") or 0,
+        "active_analysis_elapsed_seconds": (state.get("active") or {}).get("analysis_elapsed_seconds") or 0,
+        "active_identified_parts_count": (state.get("active") or {}).get("identified_parts_count") or 0,
+        "active_processed_parts_count": (state.get("active") or {}).get("processed_parts_count") or 0,
+        "active_geo_ready_count": (state.get("active") or {}).get("geo_ready_count") or 0,
     }
 
 

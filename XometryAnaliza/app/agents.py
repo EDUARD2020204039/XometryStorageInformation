@@ -127,6 +127,22 @@ def _ofertare_log_lines(result: dict[str, Any], limit: int = 80) -> list[str]:
     return lines
 
 
+def _dosar_lookup_message(job_id: str, lookup: dict[str, Any], reference_count: int) -> str:
+    current = lookup.get("current") or {}
+    next_dosar = lookup.get("next_dosar") or {}
+    lookup_part_ids = lookup.get("lookup_part_ids") or lookup.get("part_ids") or []
+    part_text = f"part_ids verificate: {len(lookup_part_ids)}"
+    if not lookup_part_ids:
+        part_text = "fara part_ids reale pentru comparatie"
+    if current.get("has_dosar"):
+        return f"Dosar lookup: {job_id} exista in {current.get('dosar_name') or current.get('dosar_id')}; {part_text}; referinte cu dosar: {reference_count}"
+    if lookup.get("offer_found"):
+        next_name = next_dosar.get("folder_name") or next_dosar.get("dosar_id") or "necunoscut"
+        return f"Dosar lookup: {job_id} exista in backend fara dosar; urmator dosar propus {next_name}; {part_text}; referinte cu dosar: {reference_count}"
+    next_name = next_dosar.get("folder_name") or next_dosar.get("dosar_id") or "necunoscut"
+    return f"Dosar lookup: {job_id} nu exista in backend; urmator dosar propus {next_name}; {part_text}; referinte cu dosar: {reference_count}"
+
+
 def _read_capture_hint(result: dict[str, Any]) -> str:
     for file_path in result.get("files") or []:
         path = str(file_path or "")
@@ -336,14 +352,16 @@ class SheetMetalLaserAgent:
             raw_geo_items = extract_geo_items(result)
             geo_items = _filter_geo_items_for_sheet_parts(job, raw_geo_items)
             failure = _classify_ofertare_failure(result)
-            failure_reason = str(failure.get("message") or "")
-            bend_report = build_bend_artifacts(job_id, offer_id, result, geo_items) if offer_id and not failure else None
             agent_busy_items = geo_items or raw_geo_items
             agent_busy = bool(agent_busy_items) and all(
                 str(item.get("classification") or "").lower() == "agent_busy"
                 or "agent is already processing" in str(item.get("reason") or "").lower()
                 for item in agent_busy_items
             )
+            if agent_busy:
+                failure = {}
+            failure_reason = str(failure.get("message") or "")
+            bend_report = build_bend_artifacts(job_id, offer_id, result, geo_items) if offer_id and not failure and not agent_busy else None
             status = (
                 "agent_busy"
                 if agent_busy
@@ -362,7 +380,7 @@ class SheetMetalLaserAgent:
                 "ofertare_result": result,
                 "geo_items": geo_items,
                 "bend_report": bend_report,
-                "error": failure_reason,
+                "error": "TecZone agent este ocupat cu alta piesa; jobul va fi reincercat." if agent_busy else failure_reason,
                 "matched_sheet_part_ids": sorted(_sheet_part_ids(job)),
                 "identified_parts_count": _sheet_part_count(job),
                 "processed_parts_count": geo_ready_count,
@@ -432,10 +450,13 @@ def process_job(job: dict[str, Any]) -> dict[str, Any]:
         reference_count = len(dosar_lookup.get("references_with_dosar") or [])
         append_event(
             "dosar.lookup",
-            f"Dosar lookup found {reference_count} references for {job_id}",
+            _dosar_lookup_message(job_id, dosar_lookup, reference_count),
             job_id=job_id,
             offer_id=job.get("offer_id"),
             references_with_dosar=dosar_lookup.get("references_with_dosar") or [],
+            current=dosar_lookup.get("current"),
+            next_dosar=dosar_lookup.get("next_dosar"),
+            lookup_part_ids=dosar_lookup.get("lookup_part_ids") or dosar_lookup.get("part_ids") or [],
         )
     except Exception as exc:
         state["dosar_lookup"] = {"success": False, "error": f"{type(exc).__name__}: {exc}"}

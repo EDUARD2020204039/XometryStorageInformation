@@ -462,13 +462,31 @@ def _finish(item: dict[str, Any], result: dict[str, Any] | None = None, error: s
         if process_seconds:
             data["last_process_seconds"] = process_seconds
         if status == "agent_busy":
+            busy_retries = int(item.get("busy_retries") or 0) + 1
+            if busy_retries > settings.AGENT_BUSY_MAX_RETRIES:
+                done = {
+                    **item,
+                    "status": "failed",
+                    "completed_ts": time.time(),
+                    "error": f"TecZone a ramas ocupat dupa {settings.AGENT_BUSY_MAX_RETRIES} reincercari.",
+                    "result_status": status,
+                    "process_seconds": process_seconds,
+                    "busy_retries": busy_retries,
+                }
+                data["active"] = None
+                data["pause_reason"] = ""
+                data["paused_until"] = 0
+                data["paused_item"] = None
+                data["completed"] = [done] + (data.get("completed") or [])[:49]
+                _write(data)
+                return 0
             retry_seconds = AGENT_BUSY_RETRY_SECONDS
             item["status"] = "queued"
             item["available_after"] = time.time() + retry_seconds
-            item["busy_retries"] = int(item.get("busy_retries") or 0) + 1
+            item["busy_retries"] = busy_retries
             data["active"] = None
             data["paused_until"] = item["available_after"]
-            data["pause_reason"] = f"TecZone Dorina ocupat; reincerc {item.get('job_id')} dupa pauza calculata"
+            data["pause_reason"] = f"TecZone ocupat; reincerc {item.get('job_id')} dupa pauza calculata ({busy_retries}/{settings.AGENT_BUSY_MAX_RETRIES})"
             data["paused_item"] = dict(item)
             data["queued"] = [item] + (data.get("queued") or [])
             _sort_queue(data)

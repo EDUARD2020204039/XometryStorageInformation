@@ -337,6 +337,27 @@ def _part_ids_from_raw(raw: Optional[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _is_fallback_part_id(value: str, job_id: Optional[str] = None) -> bool:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return True
+    if job_id and normalized == str(job_id).strip().upper():
+        return True
+    return normalized.startswith(("HJO-", "J-", "RFQ-"))
+
+
+def _part_ids_for_lookup(db: Session, offer: Offer | None, parsed_part_ids: list[str], job_id: Optional[str]) -> tuple[list[str], bool]:
+    usable = [part_id for part_id in parsed_part_ids if not _is_fallback_part_id(part_id, job_id)]
+    if usable or not offer:
+        return usable, False
+    derived = [
+        str(part.part_id)
+        for part in db.query(Part).filter(Part.offer_id == offer.id).all()
+        if part.part_id and not _is_fallback_part_id(str(part.part_id), job_id)
+    ]
+    return list(dict.fromkeys(derived)), bool(derived)
+
+
 def _offer_public_url(offer: Offer) -> str:
     return f"/offer/{offer.id}"
 
@@ -1010,7 +1031,8 @@ async def get_xometry_dosar_status(
     try:
         offer = _find_offer_by_external_id(db, external_offer_id)
         parsed_part_ids = _part_ids_from_raw(part_ids)
-        references = _find_dosar_references(db, offer, external_offer_id, job_id, parsed_part_ids)
+        lookup_part_ids, derived_part_ids_from_current = _part_ids_for_lookup(db, offer, parsed_part_ids, job_id)
+        references = _find_dosar_references(db, offer, external_offer_id, job_id, lookup_part_ids)
         references_with_dosar = [item for item in references if item.get("has_dosar")]
         next_dosar = None
         if not (offer and offer.dosar_id):
@@ -1029,6 +1051,8 @@ async def get_xometry_dosar_status(
             "offer_id": external_offer_id,
             "job_id": job_id,
             "part_ids": parsed_part_ids,
+            "lookup_part_ids": lookup_part_ids,
+            "derived_part_ids_from_current": derived_part_ids_from_current,
             "offer_found": bool(offer),
             "current": _offer_dosar_payload(offer, "current") if offer else None,
             "has_dosar": bool(offer and offer.dosar_id),
