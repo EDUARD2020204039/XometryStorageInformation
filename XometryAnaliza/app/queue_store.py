@@ -6,7 +6,7 @@ from typing import Any
 
 from .agents import process_job
 from .ofertare_client import find_project_folder_for_job
-from .store import append_event, load_job_state, safe_id, save_job_state
+from .store import append_event, list_jobs, load_job_state, safe_id, save_job_state
 from . import settings
 
 
@@ -407,6 +407,40 @@ def _sheet_status(result: dict[str, Any] | None) -> str | None:
     return (result or {}).get("sheet_metal_laser", {}).get("status") if result else None
 
 
+def _cleanup_stale_running_states(data: dict[str, Any]) -> int:
+    protected_job_ids = {
+        str(item.get("job_id") or "")
+        for item in [data.get("active"), *(data.get("queued") or [])]
+        if isinstance(item, dict) and item.get("job_id")
+    }
+    now = time.time()
+    cleaned = 0
+    for state in list_jobs(limit=10000):
+        job_id = str(state.get("job_id") or "")
+        if not job_id or job_id in protected_job_ids:
+            continue
+        sheet = state.get("sheet_metal_laser") or {}
+        if str(sheet.get("status") or "").lower() != "running":
+            continue
+        started_ts = float(sheet.get("started_ts") or state.get("updated_ts") or 0)
+        if started_ts and now - started_ts < settings.STALE_RUNNING_SECONDS:
+            continue
+        completed_ts = now
+        sheet = {
+            **sheet,
+            "status": "interrupted",
+            "error": "Jobul ramasese running fara sa mai fie activ in coada; marcat automat ca intrerupt.",
+            "completed_ts": completed_ts,
+            "process_duration_seconds": max(0, completed_ts - started_ts) if started_ts else 0,
+            "can_retry": True,
+        }
+        state["sheet_metal_laser"] = sheet
+        save_job_state(job_id, state)
+        append_event("sheet.stale_cleanup", f"Cleaned stale running state for {job_id}", job_id=job_id)
+        cleaned += 1
+    return cleaned
+
+
 def _process_seconds(item: dict[str, Any]) -> float:
     started = float(item.get("started_ts") or 0)
     return max(0, time.time() - started) if started else 0
@@ -538,9 +572,12 @@ def recover_and_start() -> dict[str, Any]:
         data["seen_offer_ids"] = sorted(seen_offers)
         _dedupe_queue(data)
         _sort_queue(data)
+        cleaned = _cleanup_stale_running_states(data)
         _write(data)
         should_start = bool(data.get("queued"))
 
     if should_start:
         ensure_worker()
+    if cleaned:
+        append_event("queue.recover", f"Cleaned {cleaned} stale running job states")
     return get_queue_state()

@@ -269,8 +269,22 @@ class SheetMetalLaserAgent:
 
         last_status = str(previous_sheet.get("status") or "").lower()
         last_attempt_ts = previous_sheet.get("completed_ts") or previous_sheet.get("started_ts") or 0
+        if last_status == "running":
+            completed_ts = time.time()
+            previous_started_ts = float(previous_sheet.get("started_ts") or 0)
+            previous_sheet = {
+                **previous_sheet,
+                "status": "interrupted",
+                "error": "Incercarea anterioara ramasese running; reiau jobul.",
+                "completed_ts": completed_ts,
+                "process_duration_seconds": max(0, completed_ts - previous_started_ts) if previous_started_ts else 0,
+                "can_retry": True,
+            }
+            previous["sheet_metal_laser"] = previous_sheet
+            save_job_state(job_id, previous)
+            append_event("sheet.stale_running", f"Sheet agent found stale running state and will retry {job_id}", job_id=job_id, offer_id=offer_id)
         if (
-            last_status != "agent_busy"
+            last_status not in ("agent_busy", "running")
             and last_attempt_ts
             and time.time() - float(last_attempt_ts) < settings.SHEET_AGENT_RETRY_SECONDS
         ):
