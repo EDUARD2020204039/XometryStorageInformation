@@ -223,6 +223,42 @@ def agent_history(limit: int = 300) -> dict[str, Any]:
     return {"items": _history_items(limit)}
 
 
+def _xometry_log_path(result: dict[str, Any]) -> str:
+    for file_path in result.get("files") or []:
+        path = str(file_path or "")
+        if path.replace("\\", "/").lower().endswith("/doc/xometry_steps.log") or path.lower().endswith("\\doc\\xometry_steps.log"):
+            return path
+    project_root = str(result.get("projectRoot") or result.get("project_root") or "").rstrip("\\/")
+    if project_root:
+        return f"{project_root}\\DOC\\xometry_steps.log"
+    return ""
+
+
+def _xometry_log_lines_from_state(state: dict[str, Any]) -> tuple[list[str], str]:
+    sheet = state.get("sheet_metal_laser") or {}
+    result = sheet.get("ofertare_result") or {}
+    log_path = _xometry_log_path(result)
+    if log_path:
+        try:
+            text = read_remote_file(log_path).decode("utf-8", "replace")
+            lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+            if lines:
+                return lines, log_path
+        except Exception:
+            pass
+    fallback_lines: list[str] = []
+    for item in result.get("warnings") or []:
+        for raw_line in str(item or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("XometryLog:"):
+                line = line[len("XometryLog:"):].strip()
+            if any(marker in line for marker in ("start:", "login.", "navigate.", "capture.", "download.", "finish:")):
+                fallback_lines.append(line)
+    return fallback_lines, log_path
+
+
 @app.get("/api/agents/history/view", response_class=HTMLResponse)
 def agent_history_view(limit: int = 300) -> HTMLResponse:
     rows = []
@@ -253,6 +289,11 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
             if offer_id and project_root
             else '<span class="muted">-</span>'
         )
+        xometry_log_link = (
+            f'<a class="button secondary" href="/api/agents/xometry-log/{quote(offer_id, safe="")}/view" target="_blank" rel="noreferrer">Log Xometry</a>'
+            if offer_id and project_root
+            else ""
+        )
         geo_link = (
             f'<a class="button" href="/api/agents/geo/{quote(offer_id, safe="")}/view" target="_blank" rel="noreferrer">GEO {ready_geo_count}</a>'
             if offer_id and ready_geo_count
@@ -266,7 +307,7 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
             f"<tr>"
             f"<td><strong>{xometry_link}</strong><div class=\"muted\">{html.escape(offer_id)}</div></td>"
             f"<td><span class=\"status {html.escape(status)}\">{html.escape(status or '-')}</span></td>"
-            f"<td>{dosar_link}<div class=\"muted path\">{html.escape(project_root)}</div></td>"
+            f"<td>{dosar_link} {xometry_log_link}<div class=\"muted path\">{html.escape(project_root)}</div></td>"
             f"<td>{geo_link}<div class=\"muted\">{html.escape(geo_note)}</div></td>"
             f"<td><strong>{processed_parts}/{identified_parts or '-'}</strong><div class=\"muted\">procesate / identificate</div></td>"
             f"<td data-duration=\"{duration_seconds}\"></td>"
@@ -292,6 +333,7 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
     a{{color:#0958d9;text-decoration:none;font-weight:700}} a:hover{{text-decoration:underline}}
     .button{{display:inline-flex;align-items:center;min-height:28px;padding:0 9px;border:1px solid #1677ff;border-radius:4px;background:white;color:#0958d9;text-decoration:none;font-weight:700}}
     .green{{border-color:#16a34a;background:#ecfdf3;color:#166534}}
+    .secondary{{border-color:#64748b;color:#334155}}
     .muted{{margin-top:4px;color:#64748b;font-size:12px}} .path{{max-width:520px;word-break:break-all}}
     .status{{display:inline-flex;min-height:22px;align-items:center;border-radius:999px;padding:0 8px;background:#e2e8f0;color:#334155;font-size:12px;font-weight:700}}
     .geo_ready,.cached{{background:#dcfce7;color:#166534}} .running{{background:#dbeafe;color:#1d4ed8}} .failed,.blocked_login,.blocked_documentation{{background:#fee2e2;color:#991b1b}} .geo_requested{{background:#fef3c7;color:#92400e}}
@@ -599,6 +641,109 @@ def geo_status(offer_id: str) -> dict[str, Any]:
     }
 
 
+@app.get("/api/agents/xometry-log/{offer_id}")
+def xometry_log_raw(offer_id: str) -> Response:
+    state = find_job_by_offer_id(offer_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Offer state not found")
+    lines, log_path = _xometry_log_lines_from_state(state)
+    if not lines:
+        raise HTTPException(status_code=404, detail="No Xometry automation log found for this offer yet.")
+    header = f"# {log_path}\n" if log_path else "# warnings fallback\n"
+    return Response(header + "\n".join(lines) + "\n", media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/agents/xometry-log/{offer_id}/view", response_class=HTMLResponse)
+def xometry_log_view(offer_id: str) -> HTMLResponse:
+    state = find_job_by_offer_id(offer_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Offer state not found")
+    job = state.get("job") or {}
+    job_id = str(state.get("job_id") or job.get("id") or offer_id)
+    sheet = state.get("sheet_metal_laser") or {}
+    status = str(sheet.get("status") or "")
+    lines, log_path = _xometry_log_lines_from_state(state)
+    raw_url = f"/api/agents/xometry-log/{quote(offer_id, safe='')}"
+    project_url = f"/api/agents/project/{quote(offer_id, safe='')}"
+    xometry_url = str(job.get("link") or job.get("url") or "")
+
+    def line_class(line: str) -> str:
+        lowered = line.lower()
+        if "failed" in lowered or "timeout" in lowered or "error" in lowered or "nu am descarcat" in lowered:
+            return "bad"
+        if "download.saved" in lowered or "download.extracted" in lowered or "login.after_submit" in lowered:
+            return "good"
+        if "skip" in lowered or "not_visible" in lowered or "xometry_error=yes" in lowered or "login=yes" in lowered:
+            return "warn"
+        if "download." in lowered:
+            return "download"
+        if "login." in lowered:
+            return "login"
+        if "navigate." in lowered:
+            return "nav"
+        if "capture." in lowered:
+            return "capture"
+        return "info"
+
+    if lines:
+        rows = "".join(
+            f'<div class="event {line_class(line)}"><div class="dot"></div><pre>{html.escape(line)}</pre></div>'
+            for line in lines
+        )
+        empty = ""
+    else:
+        rows = ""
+        empty = '<section class="empty">Nu exista inca log Xometry pentru aceasta oferta. La urmatoarea rulare va aparea DOC/xometry_steps.log.</section>'
+    xometry_link = (
+        f'<a class="button secondary" href="{html.escape(xometry_url, quote=True)}" target="_blank" rel="noreferrer">Oferta Xometry</a>'
+        if xometry_url
+        else ""
+    )
+    return HTMLResponse(f"""<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log Xometry - {html.escape(job_id)}</title>
+  <style>
+    body{{margin:0;background:#f4f7fb;color:#172033;font-family:Arial,sans-serif}}
+    header{{padding:20px 24px;background:#111827;color:white}}
+    h1{{margin:0;font-size:24px}} .sub{{margin-top:6px;color:#cbd5e1}}
+    main{{padding:18px 22px;display:grid;gap:14px}}
+    .actions{{display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+    .button{{display:inline-flex;align-items:center;min-height:34px;padding:0 12px;border:1px solid #1677ff;border-radius:5px;background:#1677ff;color:white;text-decoration:none;font-weight:700}}
+    .secondary{{background:white;color:#0958d9}}
+    .path{{color:#52606d;font-size:13px;word-break:break-all}}
+    .timeline{{background:white;border:1px solid #d9e2ec;border-radius:8px;overflow:hidden}}
+    .event{{display:grid;grid-template-columns:18px 1fr;gap:10px;padding:10px 14px;border-bottom:1px solid #eef2f7;align-items:start}}
+    .event:last-child{{border-bottom:0}}
+    .dot{{width:10px;height:10px;border-radius:50%;margin-top:5px;background:#64748b}}
+    pre{{margin:0;white-space:pre-wrap;font:13px/1.45 Consolas,monospace;color:#172033}}
+    .good .dot{{background:#16a34a}} .bad .dot{{background:#dc2626}} .warn .dot{{background:#f59e0b}}
+    .login .dot{{background:#7c3aed}} .download .dot{{background:#0ea5e9}} .nav .dot{{background:#2563eb}} .capture .dot{{background:#0891b2}}
+    .bad{{background:#fff1f2}} .warn{{background:#fffbeb}} .good{{background:#f0fdf4}}
+    .empty{{background:white;border:1px solid #d9e2ec;border-radius:8px;padding:16px;color:#52606d}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Log Xometry - {html.escape(job_id)}</h1>
+    <div class="sub">Status: {html.escape(status or "necunoscut")} &middot; Oferta {html.escape(str(offer_id))}</div>
+  </header>
+  <main>
+    <div class="actions">
+      <a class="button" href="{raw_url}" target="_blank" rel="noreferrer">Text raw</a>
+      <a class="button secondary" href="{project_url}" target="_blank" rel="noreferrer">Dosar / fisiere</a>
+      {xometry_link}
+    </div>
+    <div class="path">{html.escape(log_path or "fallback din warnings")}</div>
+    {empty}
+    <section class="timeline">{rows}</section>
+  </main>
+</body>
+</html>""")
+
+
 @app.get("/api/agents/project/{offer_id}", response_class=HTMLResponse)
 def project_status_view(offer_id: str) -> HTMLResponse:
     state = find_job_by_offer_id(offer_id)
@@ -616,6 +761,7 @@ def project_status_view(offer_id: str) -> HTMLResponse:
     job_id = str(state.get("job_id") or job.get("id") or offer_id)
     xometry_url = str(job.get("link") or job.get("url") or "")
     geo_url = f"/api/agents/geo/{quote(offer_id, safe='')}/view"
+    xometry_log_url = f"/api/agents/xometry-log/{quote(offer_id, safe='')}/view"
     rows = "".join(f"<li><code>{html.escape(path)}</code></li>" for path in files) or "<li>Nu exista fisiere raportate inca.</li>"
     warning_rows = "".join(f"<li>{html.escape(text)}</li>" for text in warnings) or "<li>Nu sunt warning-uri raportate.</li>"
     error_block = (
@@ -666,6 +812,7 @@ def project_status_view(offer_id: str) -> HTMLResponse:
       <h2>Actiuni</h2>
       {xometry_link}
       <a class="button secondary" href="{geo_url}" target="_blank" rel="noreferrer">Desfasurate GEO</a>
+      <a class="button secondary" href="{xometry_log_url}" target="_blank" rel="noreferrer">Log Xometry</a>
     </section>
     {error_block}
     <section>
