@@ -48,6 +48,27 @@ class ManualJobPayload(BaseModel):
     front: bool = True
 
 
+class XometrySessionPayload(BaseModel):
+    ok: bool = False
+    reason: str = ""
+    phase: str = ""
+    source: str = ""
+    url: str = ""
+    title: str = ""
+    body_length: int = 0
+    body_sample: str = ""
+    login_form: bool = False
+    job_board: bool = False
+    total_order_value: bool = False
+    auth_token_present: bool = False
+    api_ok: bool = False
+    api_reason: str = ""
+    api_detail: str = ""
+    api_sample_count: int | None = None
+    jobs_count: int | None = None
+    checked_at: float = 0
+
+
 def _run_jobs(payload: AgentJobsPayload) -> None:
     process_jobs(payload.jobs)
 
@@ -67,6 +88,44 @@ def _xometry_offer_url(offer_id: str = "", job_id: str = "") -> str:
         return f"https://partner.xometry.eu/rfqs/{quote(rfq_slug, safe='')}?source=rfqs"
     suffix = "?gsh=true&source=jobs&locale=en" if str(job_id or "").upper().startswith(("HJO-", "J-")) else "?source=jobs&locale=en"
     return f"https://partner.xometry.eu/offers/{quote(value, safe='')}{suffix}"
+
+
+def _xometry_session_path():
+    settings.ensure_dirs()
+    return settings.DATA_DIR / "xometry_session.json"
+
+
+def _read_xometry_session() -> dict[str, Any]:
+    path = _xometry_session_path()
+    if not path.exists():
+        return {
+            "ok": False,
+            "reason": "never_checked",
+            "phase": "",
+            "source": "",
+            "checked_at": 0,
+            "age_seconds": 0,
+        }
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {"ok": False, "reason": "status_file_invalid", "checked_at": 0}
+    checked_at = float(data.get("checked_at") or 0)
+    data["age_seconds"] = max(0, int(time.time() - checked_at)) if checked_at else 0
+    return data
+
+
+def _write_xometry_session(payload: dict[str, Any]) -> dict[str, Any]:
+    settings.ensure_dirs()
+    data = {**payload, "checked_at": float(payload.get("checked_at") or time.time())}
+    _xometry_session_path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    append_message = (
+        f"Xometry session {('OK' if data.get('ok') else 'INVALID')} "
+        f"phase={data.get('phase') or '-'} reason={data.get('reason') or '-'}"
+    )
+    from .store import append_event
+    append_event("xometry.session", append_message, ok=bool(data.get("ok")), reason=data.get("reason") or "")
+    return _read_xometry_session()
 
 
 def _find_known_job(job_id: str = "", offer_id: str = "") -> dict[str, Any] | None:
@@ -461,6 +520,10 @@ def dashboard() -> HTMLResponse:
     .actions{display:flex;align-items:center;gap:6px}.log{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap}
     .manual{display:flex;gap:8px;align-items:center}.manual input{width:100%;min-width:0}.manual button{white-space:nowrap;background:#1677ff;color:white;border-color:#1677ff}
     .hint{margin-top:8px;font-size:12px;color:#52606d}.result{margin-top:8px;font-size:12px;font-weight:700}.ok{color:#166534}.bad{color:#991b1b}
+    .session{border-left:5px solid #94a3b8}.session.ok{border-left-color:#16a34a}.session.bad{border-left-color:#dc2626}
+    .session .state{font-size:18px;font-weight:800}.session .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}
+    .session .check{font-size:12px;border:1px solid #d9e2ec;border-radius:4px;padding:6px;background:#f8fafc}
+    .session .check.yes{border-color:#86efac;background:#f0fdf4;color:#166534}.session .check.no{border-color:#fecaca;background:#fff1f2;color:#991b1b}
     @media(max-width:900px){main{grid-template-columns:1fr}}
   </style>
 </head>
@@ -479,6 +542,7 @@ def dashboard() -> HTMLResponse:
           <div id="manualResult" class="result"></div>
         </div>
       </section>
+      <section id="xometrySession" style="margin-top:16px"></section>
       <section id="active" style="margin-top:16px"></section>
       <section style="margin-top:16px"><h2>Logs</h2><div id="logs" class="panel log"></div></section>
     </div>
@@ -521,6 +585,44 @@ def dashboard() -> HTMLResponse:
       if (!item?.project_root) return `<div style="margin-top:10px"><a class="button" href="http://192.168.2.26:8585" target="_blank" rel="noreferrer">Deschide Ofertare</a></div>`;
       return `<div style="margin-top:10px"><a class="button" href="/api/agents/project/${encodeURIComponent(item.offer_id)}" target="_blank" rel="noreferrer">Dosar activ: ${esc(item.project_name || item.project_root)}</a></div>`;
     }
+    function fmtAge(seconds){
+      seconds = Math.max(0, Math.round(Number(seconds || 0)));
+      if (!seconds) return 'niciodata';
+      const m = Math.floor(seconds / 60);
+      if (m < 1) return `${seconds}s in urma`;
+      const h = Math.floor(m / 60);
+      if (!h) return `${m}m in urma`;
+      return `${h}h ${m % 60}m in urma`;
+    }
+    function renderXometrySession(session){
+      session = session || {};
+      const ok = !!session.ok;
+      const age = fmtAge(session.age_seconds || 0);
+      const reason = session.reason || 'never_checked';
+      const phase = session.phase || '-';
+      const url = session.url || '';
+      const checks = [
+        ['Token', session.auth_token_present],
+        ['API', session.api_ok],
+        ['Job Board', session.job_board],
+        ['Login form', !session.login_form],
+      ].map(([label, value]) => `<div class="check ${value ? 'yes' : 'no'}">${esc(label)}: ${value ? 'OK' : 'NU'}</div>`).join('');
+      const details = [
+        `faza: ${phase}`,
+        `motiv: ${reason}`,
+        `verificat: ${age}`,
+        session.jobs_count != null ? `joburi scrape: ${session.jobs_count}` : '',
+        session.api_reason ? `api: ${session.api_reason}` : '',
+      ].filter(Boolean).map(esc).join(' · ');
+      document.getElementById('xometrySession').innerHTML =
+        `<h2>Sesiune Xometry</h2><div class="panel session ${ok ? 'ok' : 'bad'}">` +
+        `<div class="state">${ok ? 'Conectat valid' : 'Problema login/sesiune'}</div>` +
+        `<div class="meta">${details}</div>` +
+        (url ? `<div class="meta"><a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(url)}</a></div>` : '') +
+        `<div class="grid">${checks}</div>` +
+        (session.body_sample && !ok ? `<div class="meta bad">${esc(session.body_sample).slice(0,260)}</div>` : '') +
+        `</div>`;
+    }
     async function move(id, direction){ await api('/api/queue/'+encodeURIComponent(id)+'/move',{method:'POST',body:JSON.stringify({direction})}); refresh(); }
     async function position(id, el){ await api('/api/queue/'+encodeURIComponent(id)+'/priority',{method:'POST',body:JSON.stringify({priority:Number(el.value||1)})}); refresh(); }
     async function submitManual(event){
@@ -549,7 +651,8 @@ def dashboard() -> HTMLResponse:
       const id = esc(item.job_id);
       return `<div class="job"><div><div class="id">${jobName(item, `${i+1}. `)}</div><div class="meta">${title}</div><div class="meta">${esc(item.offer_id||'')} ${esc(item.source||'')}</div></div><div class="actions"><input type="number" min="1" value="${i+1}" onchange="position('${id}',this)"><button onclick="move('${id}','up')">Up</button><button onclick="move('${id}','down')">Down</button></div></div>`;
     }
-    function renderDashboard(data, logs){
+    function renderDashboard(data, logs, xometrySession){
+      renderXometrySession(xometrySession || {});
       const paused = data.paused;
       const pauseUntil = data.paused_until ? new Date(data.paused_until * 1000).toLocaleTimeString() : '';
       document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'laptop lucreaza':paused?'Dorina ocupata':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
@@ -563,7 +666,7 @@ def dashboard() -> HTMLResponse:
     }
     async function refresh(){
       const payload = await api('/api/queue/live');
-      renderDashboard(payload.queue || payload, {items: payload.logs || []});
+      renderDashboard(payload.queue || payload, {items: payload.logs || []}, payload.xometry_session || {});
     }
     let fallbackTimer = null;
     function startFallback(){
@@ -585,7 +688,7 @@ def dashboard() -> HTMLResponse:
       source.addEventListener('snapshot', event => {
         try {
           const payload = JSON.parse(event.data);
-          renderDashboard(payload.queue || {}, {items: payload.logs || []});
+          renderDashboard(payload.queue || {}, {items: payload.logs || []}, payload.xometry_session || {});
           stopFallback();
         } catch (err) {
           startFallback();
@@ -605,6 +708,16 @@ def dashboard() -> HTMLResponse:
 @app.get("/api/queue")
 def queue_status() -> dict[str, Any]:
     return queue_store.get_queue_state()
+
+
+@app.get("/api/xometry/session")
+def xometry_session() -> dict[str, Any]:
+    return _read_xometry_session()
+
+
+@app.post("/api/xometry/session")
+def update_xometry_session(payload: XometrySessionPayload) -> dict[str, Any]:
+    return {"session": _write_xometry_session(payload.dict())}
 
 
 def _compact_queue_item(item: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -673,7 +786,7 @@ def _compact_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @app.get("/api/queue/live")
 def queue_live() -> dict[str, Any]:
-    return {"queue": _queue_live_state(), "logs": _compact_events(read_events(20))}
+    return {"queue": _queue_live_state(), "logs": _compact_events(read_events(20)), "xometry_session": _read_xometry_session()}
 
 
 @app.get("/api/queue/stream")
@@ -684,6 +797,7 @@ def queue_stream() -> StreamingResponse:
             snapshot = {
                 "queue": _queue_live_state(),
                 "logs": _compact_events(read_events(20)),
+                "xometry_session": _read_xometry_session(),
             }
             text = json.dumps(snapshot, ensure_ascii=False, default=str)
             if text != last_payload:

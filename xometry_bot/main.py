@@ -291,16 +291,51 @@ def run_iteration():
             page = context.new_page()
             details_page = context.new_page()
 
-            # 1. Login
-            auth.login(page)
+            # 1. Login and validate the Xometry session before scraping.
+            try:
+                session_status = auth.login(page)
+                ok, info = agent_client.report_xometry_session({
+                    **session_status,
+                    "source": "scraper",
+                    "phase": "login",
+                })
+                if not ok:
+                    logger.warning(f"Could not report Xometry session status: {info}")
+            except auth.XometryLoginError as e:
+                session_status = {
+                    **getattr(e, "status", {}),
+                    "ok": False,
+                    "source": "scraper",
+                    "phase": "login",
+                }
+                ok, info = agent_client.report_xometry_session(session_status)
+                if not ok:
+                    logger.warning(f"Could not report failed Xometry session status: {info}")
+                logger.error(f"Xometry login/session validation failed: {e}")
+                return
             
             # 2. Scrape
             logger.info("Scraping jobs...")
             jobs = scraper.scrape_all(page)
             if not jobs:
+                agent_client.report_xometry_session({
+                    **(session_status or {}),
+                    "ok": False,
+                    "reason": "scrape_returned_zero_jobs",
+                    "phase": "scrape",
+                    "source": "scraper",
+                })
                 logger.error("Scrape returned 0 jobs. Keeping previous data and skipping notifications.")
                 return
             logger.info(f"Total jobs found: {len(jobs)}")
+            agent_client.report_xometry_session({
+                **(session_status or {}),
+                "ok": True,
+                "reason": "scrape_ok",
+                "phase": "scrape",
+                "source": "scraper",
+                "jobs_count": len(jobs),
+            })
 
             # 3. Save to JSON for bot_app.py
             os.makedirs("data", exist_ok=True)

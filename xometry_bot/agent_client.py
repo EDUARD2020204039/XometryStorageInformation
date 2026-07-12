@@ -51,3 +51,21 @@ def fetch_geo_status(offer_id):
         return True, None, resp.json()
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}", None
+
+
+def report_xometry_session(status):
+    agent_url = getattr(config, "AGENT_URL", "")
+    timeout = getattr(config, "AGENT_TIMEOUT", 10)
+    if not agent_url:
+        return False, "AGENT_URL missing"
+    try:
+        resp = requests.post(
+            f"{agent_url.rstrip('/')}/api/xometry/session",
+            json=status or {},
+            timeout=timeout,
+        )
+        if not resp.ok:
+            return False, f"HTTP {resp.status_code}: {resp.text[:300]}"
+        return True, resp.json()
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
