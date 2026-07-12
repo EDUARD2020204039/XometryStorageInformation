@@ -303,6 +303,12 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
         error_html = html.escape(error)
         if failure_action:
             error_html += f'<div class="muted">{html.escape(failure_action)}</div>'
+        repeat_identifier = xometry_url or job_id or offer_id
+        repeat_button = (
+            f'<button type="button" class="button repeat" data-repeat="{html.escape(repeat_identifier, quote=True)}">Repeta</button>'
+            if repeat_identifier
+            else '<span class="muted">-</span>'
+        )
         rows.append(
             f"<tr>"
             f"<td><strong>{xometry_link}</strong><div class=\"muted\">{html.escape(offer_id)}</div></td>"
@@ -313,9 +319,10 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
             f"<td data-duration=\"{duration_seconds}\"></td>"
             f"<td data-ts=\"{completed_ts}\"></td>"
             f"<td class=\"err\">{error_html}</td>"
+            f"<td>{repeat_button}</td>"
             f"</tr>"
         )
-    table_rows = "".join(rows) or '<tr><td colspan="8">Nu exista istoric inca.</td></tr>'
+    table_rows = "".join(rows) or '<tr><td colspan="9">Nu exista istoric inca.</td></tr>'
     return HTMLResponse(f"""<!doctype html>
 <html lang="ro">
 <head>
@@ -324,14 +331,21 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
   <title>Istoric XometryAnaliza</title>
   <style>
     body{{margin:0;background:#f3f6f9;color:#172033;font-family:Arial,sans-serif}}
-    header{{padding:22px 26px;background:#111827;color:white}}
+    header{{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px 26px;background:#111827;color:white}}
     h1{{margin:0;font-size:24px}} .sub{{margin-top:6px;color:#cbd5e1}}
     main{{padding:18px 22px}}
+    .top-actions{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}}
+    .qa-link{{display:inline-flex;align-items:center;min-height:34px;padding:0 12px;border:1px solid white;border-radius:5px;background:white;color:#0958d9;text-decoration:none;font-weight:700}}
+    .result{{margin:0 0 12px;padding:10px 12px;border:1px solid #d9e2ec;border-radius:6px;background:white;font-size:13px;font-weight:700;display:none}}
+    .result.ok{{display:block;color:#166534;border-color:#86efac;background:#f0fdf4}}
+    .result.bad{{display:block;color:#991b1b;border-color:#fecaca;background:#fff1f2}}
     table{{width:100%;border-collapse:collapse;background:white;border:1px solid #d9e2ec;border-radius:8px;overflow:hidden}}
     th,td{{padding:10px 12px;border-bottom:1px solid #e5eaf0;text-align:left;vertical-align:top;font-size:14px}}
     th{{background:#f8fafc;font-size:12px;text-transform:uppercase;color:#52606d}}
     a{{color:#0958d9;text-decoration:none;font-weight:700}} a:hover{{text-decoration:underline}}
     .button{{display:inline-flex;align-items:center;min-height:28px;padding:0 9px;border:1px solid #1677ff;border-radius:4px;background:white;color:#0958d9;text-decoration:none;font-weight:700}}
+    button.button{{cursor:pointer;font:inherit}}
+    .repeat{{border-color:#0f766e;color:#0f766e;background:#f0fdfa}}
     .green{{border-color:#16a34a;background:#ecfdf3;color:#166534}}
     .secondary{{border-color:#64748b;color:#334155}}
     .muted{{margin-top:4px;color:#64748b;font-size:12px}} .path{{max-width:520px;word-break:break-all}}
@@ -341,10 +355,14 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
   </style>
 </head>
 <body>
-  <header><h1>Istoric XometryAnaliza</h1><div class="sub">Oferte procesate de agentul sheet/laser</div></header>
+  <header>
+    <div><h1>Istoric XometryAnaliza</h1><div class="sub">Oferte procesate de agentul sheet/laser</div></div>
+    <div class="top-actions"><a class="qa-link" href="/">Inapoi la QA</a></div>
+  </header>
   <main>
+    <div id="repeatResult" class="result"></div>
     <table>
-      <thead><tr><th>Oferta</th><th>Status</th><th>Dosar</th><th>GEO</th><th>Piese</th><th>Durata</th><th>Finalizat</th><th>Eroare</th></tr></thead>
+      <thead><tr><th>Oferta</th><th>Status</th><th>Dosar</th><th>GEO</th><th>Piese</th><th>Durata</th><th>Finalizat</th><th>Eroare</th><th>Actiuni</th></tr></thead>
       <tbody>{table_rows}</tbody>
     </table>
   </main>
@@ -365,6 +383,30 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
     document.querySelectorAll('td[data-ts]').forEach(td => {{
       const ts = Number(td.dataset.ts || 0);
       td.textContent = ts ? new Date(ts * 1000).toLocaleString() : '-';
+    }});
+    async function repeatJob(identifier) {{
+      const result = document.getElementById('repeatResult');
+      result.className = 'result';
+      result.textContent = 'Trimit jobul in coada...';
+      try {{
+        const response = await fetch('/api/queue/manual', {{
+          method: 'POST',
+          headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{identifier, force: true, front: true, source: 'history-repeat'}})
+        }});
+        const data = await response.json();
+        const added = data?.result?.added || 0;
+        result.className = 'result ' + (added ? 'ok' : 'bad');
+        result.textContent = added
+          ? `Retrimis primul in coada: ${{data.job?.id || identifier}}`
+          : `Nu l-am putut retrimite: ${{data?.detail || 'verifica daca este sheet/laser sau deja activ'}}`;
+      }} catch (err) {{
+        result.className = 'result bad';
+        result.textContent = 'Eroare la retrimitere.';
+      }}
+    }}
+    document.querySelectorAll('[data-repeat]').forEach(button => {{
+      button.addEventListener('click', () => repeatJob(button.dataset.repeat || ''));
     }});
   </script>
 </body>
