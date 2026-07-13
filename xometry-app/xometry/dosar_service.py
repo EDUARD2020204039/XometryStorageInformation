@@ -16,8 +16,8 @@ class DosarService:
     """Service for allocating Xometry dossier numbers and creating their folder/Odoo record."""
 
     def __init__(self, api_url: str | None = None, api_token: str | None = None):
-        self.api_url = (api_url or os.getenv("DOSAR_API_URL", "http://data.helpan.ro:9000")).rstrip("/")
-        self.api_token = api_token if api_token is not None else os.getenv("DOSAR_API_TOKEN", "api_token_abc123")
+        self.api_url = (api_url or os.getenv("DOSAR_API_URL", "")).rstrip("/")
+        self.api_token = api_token if api_token is not None else os.getenv("DOSAR_API_TOKEN", "")
         self.headers = {"Authorization": f"Bearer {self.api_token}"} if self.api_token else {}
         self.folder_enabled = os.getenv("DOSAR_FOLDER_ENABLED", "true").lower() in ("1", "true", "yes")
         self.folder_required = os.getenv("DOSAR_FOLDER_REQUIRED", "false").lower() in ("1", "true", "yes")

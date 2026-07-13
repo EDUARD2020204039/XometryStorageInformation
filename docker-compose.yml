@@ -38,7 +38,7 @@ services:
       - "10000:10000"
     environment:
       PORT: "10000"
-      DATABASE_URL: "sqlite:////app/data/xometry_offers.db"
+      DATABASE_URL: "${DATABASE_URL:-}"
       DOSAR_ROOT_PATH: "/mnt/xLucru"
       XOMETRY_AGENT_URL: "http://xometryanaliza:4468"
     volumes:

@@ -28,3 +28,8 @@ xometry-app/static/devize/
 xometry-app/static/docs/
 xometry-app/static/images/
 xometry-app/static/*.zip
+*.py[cod]
+*.pyo
+*.db
+*.sqlite
+*.sqlite3

@@ -265,7 +265,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 # Inițializează baza de date
-database_url = os.getenv('DATABASE_URL', 'sqlite:///xometry_offers.db')
+database_url = os.getenv('DATABASE_URL', 'sqlite:///./data/app.db')
 init_db(database_url)
 
 # Configurare template-uri și fișiere statice

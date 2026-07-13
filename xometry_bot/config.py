@@ -8,7 +8,6 @@ load_dotenv(override=True)
 
 # Debug
 tok = os.getenv("TELEGRAM_BOT_TOKEN", "")
-print(f"DEBUG: Loaded Token: {tok[:10]}...{tok[-5:] if len(tok)>5 else ''} from {os.getcwd()}")
 
 
 # Xometry Credentials
@@ -17,7 +16,7 @@ XOMETRY_PASSWORD = os.getenv("XOMETRY_PASSWORD", "")
 XOMETRY_LOGIN_URL = "https://partner.xometry.eu/profile/sign_in?locale=en"
 
 # Telegram Notification Config
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID_HERE")
 TELEGRAM_CHAT_IDS = [x.strip() for x in TELEGRAM_CHAT_ID.split(",") if x.strip()]
 
