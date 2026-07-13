@@ -2,8 +2,8 @@
 console.log("[BG] Service Worker Loaded");
 // Handles HTTP requests to Stock API and Local Logger
 
-const API_BASE = "http://86.123.232.23:2222/api";
-const API_KEY = "stoc_0f6a9b2c7d1e4f3a8c5b9d0e2a6f7c1b";
+const API_BASE = "http://127.0.0.1:2222/api";
+const API_KEY = "";
 const LOG_SERVER = "http://127.0.0.1:3333";
 const BACKEND_URLS = [
     "http://192.168.2.23:10000",

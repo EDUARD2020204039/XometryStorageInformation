@@ -12,8 +12,8 @@ print(f"DEBUG: Loaded Token: {tok[:10]}...{tok[-5:] if len(tok)>5 else ''} from 
 
 
 # Xometry Credentials
-XOMETRY_EMAIL = os.getenv("XOMETRY_EMAIL", "ofertare@helpan.ro")
-XOMETRY_PASSWORD = os.getenv("XOMETRY_PASSWORD", "Helpan1")
+XOMETRY_EMAIL = os.getenv("XOMETRY_EMAIL", "")
+XOMETRY_PASSWORD = os.getenv("XOMETRY_PASSWORD", "")
 XOMETRY_LOGIN_URL = "https://partner.xometry.eu/profile/sign_in?locale=en"
 
 # Telegram Notification Config
@@ -39,7 +39,7 @@ PLAYWRIGHT_LAUNCH_RETRIES = int(os.getenv("PLAYWRIGHT_LAUNCH_RETRIES", "2"))
 PLAYWRIGHT_LAUNCH_RETRY_DELAY = float(os.getenv("PLAYWRIGHT_LAUNCH_RETRY_DELAY", "3"))
 
 # Backend (data sink)
-BACKEND_URL = os.getenv("BACKEND_URL", "http://86.123.232.23:10000")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:10000")
 BACKEND_ENABLED = os.getenv("BACKEND_ENABLED", "true").lower() in ("1", "true", "yes")
 BACKEND_API_KEY = os.getenv("BACKEND_API_KEY", "")
 BACKEND_RESEND_EXISTING = os.getenv("BACKEND_RESEND_EXISTING", "false").lower() in ("1", "true", "yes")
@@ -47,7 +47,7 @@ BACKEND_MAX_OFFERS_PER_RUN = int(os.getenv("BACKEND_MAX_OFFERS_PER_RUN", "10"))
 
 # XometryAnaliza agent service
 AGENT_URL = os.getenv("AGENT_URL", "http://xometryanaliza:4468")
-AGENT_PUBLIC_URL = os.getenv("AGENT_PUBLIC_URL", "http://192.168.2.23:4468")
+AGENT_PUBLIC_URL = os.getenv("AGENT_PUBLIC_URL", "http://127.0.0.1:4468")
 AGENT_TIMEOUT = int(os.getenv("AGENT_TIMEOUT", "10"))
 
 # Orders deep sync
