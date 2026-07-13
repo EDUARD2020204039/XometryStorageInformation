@@ -23,6 +23,8 @@ services:
       TELEGRAM_SHEET_FAILURE_LOGS: "false"
       TELEGRAM_GEO_LOGS: "false"
       MCP_TOKEN: "${XOMETRY_ANALIZA_MCP_TOKEN:-}"
+      LOCAL_DOSAR_ROOT: "/mnt/xLucru"
+      LOCAL_DOSAR_WINDOWS_ROOT: '\\192.168.2.6\d\00 COTATII IN LUCRU'
     ports:
       - "4468:4468"
     volumes:

@@ -224,9 +224,18 @@ def _local_dosar_windows_path(folder: Path) -> str:
 
 
 def _step_files(folder: Path) -> list[Path]:
+    ignored_dirs = {"OFERTA", "WORK", "EROARE", "BACKUP", "__MACOSX"}
+
+    def is_generated_path(path: Path) -> bool:
+        try:
+            relative = path.relative_to(folder)
+        except ValueError:
+            return False
+        return any(part.upper() in ignored_dirs for part in relative.parts[:-1])
+
     files: list[Path] = []
     for pattern in ("*.stp", "*.step", "*.STP", "*.STEP"):
-        files.extend(path for path in folder.rglob(pattern) if path.is_file())
+        files.extend(path for path in folder.rglob(pattern) if path.is_file() and not is_generated_path(path))
     unique = {str(path.resolve()).lower(): path for path in files}
     return sorted(unique.values(), key=lambda path: str(path).lower())
 
