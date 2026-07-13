@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -158,24 +159,24 @@ def _read_capture_hint(result: dict[str, Any]) -> str:
     return ""
 
 
+def _has_successful_xometry_capture(text: str) -> bool:
+    if "download.saved:" in text or "download.extracted:" in text or "pachet oferta generat" in text:
+        return True
+    if "capture.h1: job " in text:
+        return True
+    for match in re.finditer(r"capture\.parsed:[^\n]*parts=(\d+)", text):
+        try:
+            if int(match.group(1)) > 0:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def _classify_ofertare_failure(result: dict[str, Any]) -> dict[str, Any]:
     text = _result_text(result)
     capture_hint = ""
-    login_tokens = (
-        "pagina de login",
-        "xometry_email/xometry_password",
-        "basic_email",
-        "basic_password",
-        "sign in",
-        "log in",
-    )
-    if any(token in text for token in login_tokens):
-        return {
-            "status": "blocked_login",
-            "failure_type": "xometry_login_required",
-            "message": "Ofertare a ajuns la login Xometry; verifica sesiunea sau credentialele Xometry pe laptopul de ofertare.",
-            "action": "Deschide Ofertare-Automata pe laptop, refa login-ul Xometry si retrimite jobul manual.",
-        }
+    successful_capture = _has_successful_xometry_capture(text)
 
     document_tokens = (
         "nu am descarcat automat fisierele",
@@ -186,18 +187,48 @@ def _classify_ofertare_failure(result: dict[str, Any]) -> dict[str, Any]:
     )
     if any(token in text for token in document_tokens):
         capture_hint = _read_capture_hint(result)
-        if "something went wrong" in capture_hint or "we couldn" in capture_hint:
+        if any(token in capture_hint for token in ("basic_email", "basic_password", "sign in", "log in")):
+            message = "Xometry a returnat pagina de login in loc de documentatie."
+            status = "blocked_login"
+            failure_type = "xometry_login_required"
+            action = "Refa sesiunea Xometry pe laptopul de ofertare si retrimite jobul."
+        elif "something went wrong" in capture_hint or "we couldn" in capture_hint:
             message = "Xometry a returnat pagina de eroare in loc de documentatie; nu am de unde sa extrag STEP/GEO."
+            status = "blocked_documentation"
+            failure_type = "xometry_documentation_unavailable"
+            action = "Verifica pagina Xometry si folderul DOC al proiectului; daca fisierele apar manual, retrimite jobul din dashboard."
         elif "back to rfqs" in capture_hint and "not a partner" in capture_hint:
             message = "RFQ-ul nu a incarcat documentatia pentru partener; captura nu contine fisiere STEP."
+            status = "blocked_documentation"
+            failure_type = "xometry_documentation_unavailable"
+            action = "Verifica pagina Xometry si folderul DOC al proiectului; daca fisierele apar manual, retrimite jobul din dashboard."
         else:
             message = "Nu s-au descarcat fisierele Xometry/STEP; TecZone nu poate porni fara documentatie."
+            status = "blocked_documentation"
+            failure_type = "xometry_documentation_unavailable"
+            action = "Verifica pagina Xometry si folderul DOC al proiectului; daca fisierele apar manual, retrimite jobul din dashboard."
         return {
-            "status": "blocked_documentation",
-            "failure_type": "xometry_documentation_unavailable",
+            "status": status,
+            "failure_type": failure_type,
             "message": message,
-            "action": "Verifica pagina Xometry si folderul DOC al proiectului; daca fisierele apar manual, retrimite jobul din dashboard.",
+            "action": action,
             "capture_hint": capture_hint[:500],
+        }
+
+    login_tokens = (
+        "pagina de login",
+        "xometry_login_required",
+        "xometry_email/xometry_password",
+        "basic_email",
+        "basic_password",
+        "capture.body: login=yes",
+    )
+    if not successful_capture and any(token in text for token in login_tokens):
+        return {
+            "status": "blocked_login",
+            "failure_type": "xometry_login_required",
+            "message": "Ofertare a ajuns la login Xometry; verifica sesiunea sau credentialele Xometry pe laptopul de ofertare.",
+            "action": "Deschide Ofertare-Automata pe laptop, refa login-ul Xometry si retrimite jobul manual.",
         }
 
     for item in result.get("trutops") or []:

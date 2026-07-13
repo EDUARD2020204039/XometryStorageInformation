@@ -48,17 +48,17 @@ def _classify(text: str, output: dict[str, Any]) -> tuple[str, str, str]:
             "Ofertare API a respins cererea din cauza autentificarii.",
             "Verifica tokenul X-Ofertare-Token dintre XometryAnaliza si Ofertare-Automata.",
         )
-    if "pagina de login" in text or "xometry_email" in text or "basic_email" in text or "sign in" in text:
-        return (
-            "xometry_login",
-            "Automatizarea a ajuns pe login Xometry in loc de oferta.",
-            "Refa sesiunea Xometry pe laptopul de ofertare si ruleaza testul de sesiune din QA.",
-        )
     if "nu am descarcat automat fisierele" in text or "nu am gasit nicio piesa" in text or "source_missing" in text:
         return (
             "documentation_missing",
             "Documentatia/STEP nu a fost descarcata sau nu a fost gasita.",
             "Deschide oferta in browser, verifica download-ul documentatiei si apoi retrimite jobul.",
+        )
+    if "pagina de login" in text or "xometry_login_required" in text or "xometry_email" in text or "basic_email" in text or "capture.body: login=yes" in text:
+        return (
+            "xometry_login",
+            "Automatizarea a ajuns pe login Xometry in loc de oferta.",
+            "Refa sesiunea Xometry pe laptopul de ofertare si ruleaza testul de sesiune din QA.",
         )
     if "x:\\" in text or "winerror 3" in text or "cannot find the path" in text or "file not found" in text:
         return (

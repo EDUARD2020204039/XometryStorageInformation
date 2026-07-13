@@ -255,7 +255,7 @@ def run_checks(source: str = "manual") -> dict[str, Any]:
 
 def _alert_signature(payload: dict[str, Any]) -> str:
     failed = [item for item in payload.get("scenarios") or [] if not item.get("ok")]
-    return "|".join(f"{item.get('name')}:{item.get('status')}:{item.get('summary')}" for item in failed)
+    return "|".join(f"{item.get('name')}:{item.get('status')}" for item in failed)
 
 
 def _emit_alert_if_changed(payload: dict[str, Any]) -> None:
