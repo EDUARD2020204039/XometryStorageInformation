@@ -75,9 +75,6 @@ def run_iteration():
                 part.get("process"),
                 part.get("processType"),
                 part.get("process_type"),
-                part.get("material"),
-                part.get("part_name"),
-                part.get("name"),
             ]
             processes = part.get("processes")
             if isinstance(processes, list):

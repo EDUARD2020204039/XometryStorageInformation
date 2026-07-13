@@ -49,9 +49,6 @@ def _part_process_text(part: dict[str, Any]) -> str:
         part.get("process"),
         part.get("processType"),
         part.get("process_type"),
-        part.get("material"),
-        part.get("part_name"),
-        part.get("name"),
     ]
     processes = part.get("processes")
     if isinstance(processes, list):
@@ -403,7 +400,7 @@ class SheetMetalLaserAgent:
         try:
             previous_project = (previous_sheet.get("ofertare_result") or {}).get("projectRoot")
             if local_project_path:
-                result = run_teczone_folder(local_project_path)
+                result = run_teczone_folder(local_project_path, allowed_part_ids=sorted(_sheet_part_ids(job)))
                 result = {
                     **result,
                     "projectRoot": result.get("projectRoot") or result.get("project_root") or local_project_path,
@@ -412,10 +409,10 @@ class SheetMetalLaserAgent:
                 }
                 append_event("sheet.local_folder", f"Running TecZone on local dosar folder for {job_id}", job_id=job_id, offer_id=offer_id, project_root=local_project_path)
             elif last_status == "agent_busy" and previous_project:
-                result = run_teczone_folder(str(previous_project))
+                result = run_teczone_folder(str(previous_project), allowed_part_ids=sorted(_sheet_part_ids(job)))
                 append_event("sheet.retry_folder", f"Retrying TecZone on existing folder for {job_id}", job_id=job_id, offer_id=offer_id, project_root=previous_project)
             else:
-                result = run_ofertare_automata(job)
+                result = run_ofertare_automata(job, allowed_part_ids=sorted(_sheet_part_ids(job)))
             for log_line in _ofertare_log_lines(result):
                 append_event("ofertare.log", log_line, job_id=job_id, offer_id=offer_id)
             raw_geo_items = extract_geo_items(result)

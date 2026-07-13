@@ -14,7 +14,7 @@ def _headers() -> dict[str, str]:
     return headers
 
 
-def run_ofertare_automata(job: dict[str, Any]) -> dict[str, Any]:
+def run_ofertare_automata(job: dict[str, Any], allowed_part_ids: list[str] | None = None) -> dict[str, Any]:
     url = job.get("link") or job.get("url")
     if not url:
         raise ValueError("Job has no Xometry offer URL.")
@@ -25,6 +25,8 @@ def run_ofertare_automata(job: dict[str, Any]) -> dict[str, Any]:
         "headless": True,
         "run_trutops": True,
     }
+    if allowed_part_ids:
+        payload["allowed_part_ids"] = allowed_part_ids
     if settings.XOMETRY_EMAIL:
         payload["email"] = settings.XOMETRY_EMAIL
     if settings.XOMETRY_PASSWORD:
@@ -46,11 +48,14 @@ def run_ofertare_automata(job: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def run_teczone_folder(project_path: str) -> dict[str, Any]:
+def run_teczone_folder(project_path: str, allowed_part_ids: list[str] | None = None) -> dict[str, Any]:
     headers = _headers()
+    payload: dict[str, Any] = {"project_path": project_path}
+    if allowed_part_ids:
+        payload["allowed_part_ids"] = allowed_part_ids
     response = requests.post(
         f"{settings.OFERTARE_AUTOMATA_URL}/api/teczone/folder",
-        json={"project_path": project_path},
+        json=payload,
         headers=headers,
         timeout=(settings.OFERTARE_AUTOMATA_CONNECT_TIMEOUT, settings.OFERTARE_AUTOMATA_READ_TIMEOUT),
     )
