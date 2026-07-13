@@ -89,6 +89,8 @@ def _geo_item_text(item: dict[str, Any]) -> str:
 
 
 def _filter_geo_items_for_sheet_parts(job: dict[str, Any], geo_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if job.get("local_dosar"):
+        return geo_items
     sheet_ids = _sheet_part_ids(job)
     if not sheet_ids:
         return geo_items
@@ -247,6 +249,7 @@ class SheetMetalLaserAgent:
         job_id = _job_id(job)
         offer_id = str(job.get("offer_id") or "")
         url = str(job.get("link") or job.get("url") or "")
+        local_project_path = str(job.get("project_path") or job.get("local_project_path") or "").strip()
         previous = load_job_state(job_id) or {}
         previous_sheet = previous.get("sheet_metal_laser") or {}
         previous_geo = previous_sheet.get("geo_items") or []
@@ -321,6 +324,7 @@ class SheetMetalLaserAgent:
             "status": "running",
             "started_ts": started_ts,
             "url": url,
+            "project_path": local_project_path,
             "identified_parts_count": _sheet_part_count(job),
             "processed_parts_count": 0,
             "geo_ready_count": 0,
@@ -342,7 +346,16 @@ class SheetMetalLaserAgent:
 
         try:
             previous_project = (previous_sheet.get("ofertare_result") or {}).get("projectRoot")
-            if last_status == "agent_busy" and previous_project:
+            if local_project_path:
+                result = run_teczone_folder(local_project_path)
+                result = {
+                    **result,
+                    "projectRoot": result.get("projectRoot") or result.get("project_root") or local_project_path,
+                    "projectName": result.get("projectName") or result.get("project_name") or local_project_path.replace("\\", "/").rstrip("/").split("/")[-1],
+                    "localDosar": True,
+                }
+                append_event("sheet.local_folder", f"Running TecZone on local dosar folder for {job_id}", job_id=job_id, offer_id=offer_id, project_root=local_project_path)
+            elif last_status == "agent_busy" and previous_project:
                 result = run_teczone_folder(str(previous_project))
                 append_event("sheet.retry_folder", f"Retrying TecZone on existing folder for {job_id}", job_id=job_id, offer_id=offer_id, project_root=previous_project)
             else:

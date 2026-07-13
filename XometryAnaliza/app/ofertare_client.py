@@ -47,14 +47,20 @@ def run_ofertare_automata(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_teczone_folder(project_path: str) -> dict[str, Any]:
+    headers = _headers()
     response = requests.post(
         f"{settings.OFERTARE_AUTOMATA_URL}/api/teczone/folder",
         json={"project_path": project_path},
-        headers=_headers(),
+        headers=headers,
         timeout=(settings.OFERTARE_AUTOMATA_CONNECT_TIMEOUT, settings.OFERTARE_AUTOMATA_READ_TIMEOUT),
     )
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    if data.get("result"):
+        return data["result"]
+    if data.get("status_url"):
+        return poll_automation_job(data["status_url"], headers)
+    return data
 
 
 def find_project_folder_for_job(job_id: str) -> dict[str, Any] | None:

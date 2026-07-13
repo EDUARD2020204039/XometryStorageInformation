@@ -44,6 +44,9 @@ WATCHDOG_OFERTARE_HEALTH_TIMEOUT = int(os.getenv("WATCHDOG_OFERTARE_HEALTH_TIMEO
 WATCHDOG_RECENT_ERROR_SECONDS = int(os.getenv("WATCHDOG_RECENT_ERROR_SECONDS", "1800"))
 WATCHDOG_TELEGRAM_ALERTS = os.getenv("WATCHDOG_TELEGRAM_ALERTS", "true").lower() in ("1", "true", "yes")
 
+LOCAL_DOSAR_ROOT = os.getenv("LOCAL_DOSAR_ROOT", "/mnt/xLucru")
+LOCAL_DOSAR_WINDOWS_ROOT = os.getenv("LOCAL_DOSAR_WINDOWS_ROOT", r"X:\\")
+
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

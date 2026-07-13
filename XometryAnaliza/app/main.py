@@ -3,7 +3,7 @@ import json
 import re
 import time
 from typing import Any
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 from urllib.parse import quote
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Body, Header
@@ -47,6 +47,13 @@ class ManualJobPayload(BaseModel):
     source: str = "manual"
     force: bool = True
     front: bool = True
+
+
+class LocalDosarPayload(BaseModel):
+    dosar_number: str = ""
+    force: bool = True
+    front: bool = True
+    source: str = "local-dosar"
 
 
 class XometrySessionPayload(BaseModel):
@@ -194,6 +201,104 @@ def _manual_job_from_payload(payload: ManualJobPayload) -> dict[str, Any]:
     return job
 
 
+def _local_dosar_number(value: str) -> str:
+    match = re.search(r"\d{3,}", str(value or ""))
+    if not match:
+        raise HTTPException(status_code=400, detail="Numarul de dosar trebuie sa contina cel putin 3 cifre.")
+    return match.group(0)
+
+
+def _local_dosar_linux_root() -> Path:
+    return Path(settings.LOCAL_DOSAR_ROOT)
+
+
+def _local_dosar_windows_path(folder: Path) -> str:
+    root = _local_dosar_linux_root()
+    try:
+        relative = folder.resolve().relative_to(root.resolve())
+    except Exception:
+        relative = Path(folder.name)
+    windows_root = str(settings.LOCAL_DOSAR_WINDOWS_ROOT or "X:\\").rstrip("\\/")
+    suffix = str(relative).replace("/", "\\")
+    return f"{windows_root}\\{suffix}" if suffix else windows_root
+
+
+def _step_files(folder: Path) -> list[Path]:
+    files: list[Path] = []
+    for pattern in ("*.stp", "*.step", "*.STP", "*.STEP"):
+        files.extend(path for path in folder.rglob(pattern) if path.is_file())
+    unique = {str(path.resolve()).lower(): path for path in files}
+    return sorted(unique.values(), key=lambda path: str(path).lower())
+
+
+def _find_local_dosar_folder(dosar_number: str) -> dict[str, Any]:
+    root = _local_dosar_linux_root()
+    if not root.exists():
+        raise HTTPException(status_code=404, detail=f"Radacina dosarelor nu exista: {root}")
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail=f"Radacina dosarelor nu este folder: {root}")
+
+    number = _local_dosar_number(dosar_number)
+    candidates = []
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        name = child.name
+        if name == number or name.startswith(f"{number}_") or name.startswith(f"{number}-") or name.startswith(f"{number} "):
+            candidates.append(child)
+    if not candidates:
+        raise HTTPException(status_code=404, detail=f"Nu am gasit folder pe X pentru dosarul {number}.")
+
+    candidates.sort(key=lambda path: (0 if path.name == number else 1, -path.stat().st_mtime, path.name.lower()))
+    folder = candidates[0]
+    steps = _step_files(folder)
+    if not steps:
+        raise HTTPException(status_code=400, detail=f"Folderul {folder.name} nu contine fisiere STEP/STP.")
+    return {
+        "dosar_number": number,
+        "folder_name": folder.name,
+        "linux_path": str(folder),
+        "windows_path": _local_dosar_windows_path(folder),
+        "step_count": len(steps),
+        "step_files": [str(path) for path in steps[:200]],
+        "candidate_count": len(candidates),
+    }
+
+
+def _local_dosar_job(info: dict[str, Any]) -> dict[str, Any]:
+    number = str(info["dosar_number"])
+    job_id = f"DOSAR-{number}"
+    offer_id = f"local-{number}"
+    step_files = info.get("step_files") or []
+    return {
+        "id": job_id,
+        "job_id": job_id,
+        "offer_id": offer_id,
+        "title": f"Dosar local {info.get('folder_name') or number}",
+        "job_name": f"Dosar local {number}",
+        "type": "Local dosar",
+        "source": "local-dosar",
+        "process": "sheet metal, laser cutting, bending",
+        "raw_text": "local dosar sheet metal laser cutting bending teczone",
+        "manual": True,
+        "local_dosar": True,
+        "dosar_number": number,
+        "project_path": info.get("windows_path"),
+        "project_path_linux": info.get("linux_path"),
+        "project_name": info.get("folder_name"),
+        "parts": [
+            {
+                "part_id": Path(path).stem,
+                "part_name": Path(path).name,
+                "process": "Sheet",
+                "processType": "Laser Cutting",
+                "source_path": path,
+            }
+            for path in step_files
+        ],
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "service": "xometry-analiza-agents"}
@@ -240,6 +345,23 @@ def submit_manual_job(payload: ManualJobPayload) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Nu pot construi URL Xometry pentru acest job.")
     result = queue_store.enqueue_jobs([job], payload.source or "manual", force=payload.force, front=payload.front)
     return {"ok": True, "job": job, "result": result}
+
+
+@app.get("/api/local-dosar/{dosar_number}")
+def local_dosar_preview(dosar_number: str) -> dict[str, Any]:
+    info = _find_local_dosar_folder(dosar_number)
+    return {"ok": True, "dosar": info, "job": _local_dosar_job(info)}
+
+
+@app.post("/api/local-dosar/run")
+def submit_local_dosar(payload: LocalDosarPayload) -> dict[str, Any]:
+    info = _find_local_dosar_folder(payload.dosar_number)
+    job = _local_dosar_job(info)
+    result = queue_store.enqueue_jobs([job], payload.source or "local-dosar", force=payload.force, front=payload.front)
+    append_message = f"Dosar local {info['dosar_number']} trimis la TecZone: {info['folder_name']} ({info['step_count']} STEP)"
+    from .store import append_event
+    append_event("local_dosar.enqueue", append_message, job_id=job["id"], offer_id=job["offer_id"], folder=info["windows_path"], step_count=info["step_count"])
+    return {"ok": True, "dosar": info, "job": job, "result": result}
 
 
 @app.get("/api/agents/logs")
@@ -345,7 +467,7 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
         offer_id = str(item.get("offer_id") or "")
         job_id = str(item.get("job_id") or "")
         xometry_url = str(item.get("url") or "")
-        if not xometry_url and offer_id:
+        if not xometry_url and offer_id and not offer_id.startswith("local-"):
             xometry_url = f"https://partner.xometry.eu/offers/{quote(offer_id, safe='')}?gsh=true&source=jobs&locale=en"
         project_name = str(item.get("project_name") or "")
         project_root = str(item.get("project_root") or "")
@@ -546,6 +668,17 @@ def dashboard() -> HTMLResponse:
           <div id="manualResult" class="result"></div>
         </div>
       </section>
+      <section style="margin-top:16px">
+        <h2>Proceseaza dosar local</h2>
+        <div class="panel">
+          <form class="manual" onsubmit="submitLocalDosar(event)">
+            <input id="localDosar" placeholder="Ex: 34397" autocomplete="off">
+            <button type="submit">Proceseaza dosar</button>
+          </form>
+          <div class="hint">Cauta folderul pe X, verifica STEP/STP si ruleaza TecZoneBEND direct pe dosar.</div>
+          <div id="localDosarResult" class="result"></div>
+        </div>
+      </section>
       <section id="watchdogStatus" style="margin-top:16px"></section>
       <section id="xometrySession" style="margin-top:16px"></section>
       <section id="active" style="margin-top:16px"></section>
@@ -566,7 +699,11 @@ def dashboard() -> HTMLResponse:
       if (m) return `${m}m ${s}s`;
       return `${s}s`;
     };
-    const xometryUrl = (item) => item?.url || (item?.offer_id ? `https://partner.xometry.eu/offers/${encodeURIComponent(item.offer_id)}?gsh=true&source=jobs&locale=en` : '');
+    const xometryUrl = (item) => {
+      if (!item) return '';
+      if (String(item.offer_id || '').startsWith('local-') || item.source === 'local-dosar') return item.url || '';
+      return item.url || (item.offer_id ? `https://partner.xometry.eu/offers/${encodeURIComponent(item.offer_id)}?gsh=true&source=jobs&locale=en` : '');
+    };
     function jobName(item, prefix=''){
       const url = xometryUrl(item);
       const label = esc(item?.job_id || item?.title || item?.offer_id || 'oferta');
@@ -665,6 +802,38 @@ def dashboard() -> HTMLResponse:
       } catch (err) {
         result.className = 'result bad';
         result.textContent = 'Eroare la trimitere.';
+      }
+    }
+    async function submitLocalDosar(event){
+      event.preventDefault();
+      const input = document.getElementById('localDosar');
+      const result = document.getElementById('localDosarResult');
+      const value = input.value.trim();
+      if (!value) return;
+      result.className = 'result';
+      result.textContent = 'Caut dosarul pe X...';
+      try {
+        const response = await fetch('/api/local-dosar/run', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({dosar_number:value, force:true, front:true})
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          result.className = 'result bad';
+          result.textContent = data?.detail || 'Nu am putut porni dosarul local.';
+          return;
+        }
+        const added = data?.result?.added || 0;
+        result.className = 'result ' + (added ? 'ok' : 'bad');
+        result.textContent = added
+          ? `Adaugat: ${data.dosar?.folder_name || value} (${data.dosar?.step_count || 0} STEP)`
+          : `Nu a fost adaugat: ${data?.result?.skipped_active ? 'deja activ' : 'verifica starea/coada'}`;
+        if (added) input.value = '';
+        refresh();
+      } catch (err) {
+        result.className = 'result bad';
+        result.textContent = 'Eroare la trimiterea dosarului local.';
       }
     }
     function jobHtml(item, i){
@@ -1023,6 +1192,8 @@ def mcp_tools(x_mcp_token: str | None = Header(default=None)) -> dict[str, Any]:
             "queue.reorder": {"job_ids": ["HJO-1", "J-2"]},
             "queue.submit": {"source": "hermes", "jobs": []},
             "queue.submit_manual": {"identifier": "URL, offer id, HJO-..., J-... or RFQ URL", "force": True, "front": True},
+            "local_dosar.preview": {"dosar_number": "34397"},
+            "local_dosar.run": {"dosar_number": "34397", "force": True, "front": True},
             "watchdog.status": {},
             "watchdog.run": {},
         },
@@ -1060,6 +1231,22 @@ def mcp(payload: dict[str, Any] = Body(default_factory=dict), x_mcp_token: str |
         result = watchdog.latest_status()
     elif method == "watchdog.run":
         result = watchdog.run_checks(source="mcp")
+    elif method == "local_dosar.preview":
+        info = _find_local_dosar_folder(str(params.get("dosar_number") or ""))
+        result = {"dosar": info, "job": _local_dosar_job(info)}
+    elif method == "local_dosar.run":
+        info = _find_local_dosar_folder(str(params.get("dosar_number") or ""))
+        job = _local_dosar_job(info)
+        result = {
+            "dosar": info,
+            "job": job,
+            **queue_store.enqueue_jobs(
+                [job],
+                str(params.get("source") or "mcp-local-dosar"),
+                force=bool(params.get("force", True)),
+                front=bool(params.get("front", True)),
+            ),
+        }
     else:
         raise HTTPException(status_code=400, detail=f"Unknown MCP method: {method}")
     return {"jsonrpc": "2.0", "id": payload.get("id"), "result": result}
