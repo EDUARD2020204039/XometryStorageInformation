@@ -177,6 +177,9 @@ def run_iteration():
                 label = _geo_file_label(item, number)
                 geo_links.append(f'{number}. <a href="{escape_html(geo_url)}">{escape_html(label)}</a>')
             geo_line = "Geo:\n" + "\n".join(geo_links) + "\n"
+            bend_report = geo_status.get("bend_report") or {}
+            if bend_report and not bend_report.get("has_bend_issues") and int(bend_report.get("info_count") or 0) > 0:
+                geo_line += "Indoire: fara indoiri detectate\n"
             geo_state_key = "geo_links_all_v1:" + "|".join(
                 str(item.get("target_path") or item.get("targetPath") or "")
                 for _, item in geo_ready_items

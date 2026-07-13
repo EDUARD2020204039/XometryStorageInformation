@@ -848,7 +848,10 @@
         if (bend) {
             const bendLink = document.createElement('a');
             bendLink.className = bend.has_bend_issues ? 'xom-bend-status issue' : 'xom-bend-status ok';
-            bendLink.textContent = bend.has_bend_issues ? 'Indoire: probleme' : 'Indoire: fara probleme';
+            const hasNoBendInfo = !bend.has_bend_issues && Number(bend.info_count || 0) > 0;
+            bendLink.textContent = bend.has_bend_issues
+                ? 'Indoire: probleme'
+                : (hasNoBendInfo ? 'Indoire: fara indoiri' : 'Indoire: fara probleme');
             bendLink.title = bend.status || bendLink.textContent;
             const reportUrl = bendReportUrl(agentSource, bend);
             if (reportUrl) {
