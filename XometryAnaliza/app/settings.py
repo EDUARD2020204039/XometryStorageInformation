@@ -47,6 +47,12 @@ WATCHDOG_TELEGRAM_ALERTS = os.getenv("WATCHDOG_TELEGRAM_ALERTS", "true").lower()
 LOCAL_DOSAR_ROOT = os.getenv("LOCAL_DOSAR_ROOT", "/mnt/xLucru")
 LOCAL_DOSAR_WINDOWS_ROOT = os.getenv("LOCAL_DOSAR_WINDOWS_ROOT", r"X:\\")
 
+HERMES_DIAGNOSTICS_ENABLED = os.getenv("HERMES_DIAGNOSTICS_ENABLED", "true").lower() in ("1", "true", "yes")
+HERMES_AGENT_URL = os.getenv("HERMES_AGENT_URL", "").rstrip("/")
+HERMES_API_KEY = os.getenv("HERMES_API_KEY", "")
+HERMES_AGENT_MODEL = os.getenv("HERMES_AGENT_MODEL", "auto")
+HERMES_DIAGNOSTIC_TIMEOUT_SECONDS = int(os.getenv("HERMES_DIAGNOSTIC_TIMEOUT_SECONDS", "45"))
+
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

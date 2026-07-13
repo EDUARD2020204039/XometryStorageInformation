@@ -10,6 +10,7 @@ from .store import append_event, load_job_state, save_job_state
 from .telegram_log import send_log
 from .xometry_backend_client import lookup_dosar_references
 from .bend_artifacts import build_bend_artifacts, copy_bend_artifacts_to_dosar
+from .diagnostics import diagnose_teczone_failure
 
 SHEET_KEYWORDS = (
     "sheet",
@@ -210,6 +211,30 @@ def _classify_ofertare_failure(result: dict[str, Any]) -> dict[str, Any]:
                 "action": "Verifica documentatia descarcata si retrimite jobul dupa ce exista STEP in DOC.",
             }
     return {}
+
+
+def _needs_diagnostic(output: dict[str, Any]) -> bool:
+    status = str(output.get("status") or "").lower()
+    if status in {"", "geo_ready", "cached", "agent_busy"}:
+        return False
+    return bool(output.get("error") or output.get("failure_type") or status in {"failed", "blocked_login", "blocked_documentation", "geo_requested"})
+
+
+def _attach_diagnostic(job: dict[str, Any], result: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    if not _needs_diagnostic(output):
+        return output
+    job_id = _job_id(job)
+    try:
+        diagnostic = diagnose_teczone_failure(job, result, output)
+        return {**output, "diagnostic": diagnostic}
+    except Exception as exc:
+        append_event(
+            "diagnostic.failed",
+            f"Diagnostic failed for {job_id}: {type(exc).__name__}: {exc}",
+            job_id=job_id,
+            offer_id=job.get("offer_id"),
+        )
+        return output
 
 
 class RouterAgent:
@@ -420,6 +445,7 @@ class SheetMetalLaserAgent:
                     failure_type=failure.get("failure_type"),
                     action=failure.get("action"),
                 )
+            output = _attach_diagnostic(job, result, output)
             append_event("sheet.done", f"Sheet agent finished {job_id}: {status}", job_id=job_id, offer_id=offer_id, geo_items=geo_items)
             if geo_items and settings.TELEGRAM_GEO_LOGS:
                 first_geo = geo_items[0].get("target_path")
@@ -439,6 +465,7 @@ class SheetMetalLaserAgent:
                 "completed_ts": completed_ts,
                 "process_duration_seconds": max(0, completed_ts - started_ts),
             }
+            output = _attach_diagnostic(job, {}, output)
             append_event("sheet.failed", f"Sheet agent failed {job_id}: {output['error']}", job_id=job_id, offer_id=offer_id)
             if settings.TELEGRAM_SHEET_FAILURE_LOGS:
                 send_log(f"XometryAnaliza: EROARE SheetMetal/Laser pentru {job_id}: {output['error']}")
