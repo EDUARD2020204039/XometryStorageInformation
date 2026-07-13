@@ -114,11 +114,12 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
         """)
 
     for index, item in enumerate(info_items, start=1):
+        review = " Verifica manual daca piesa ar trebui sa aiba indoiri." if item.get("manual_review") else ""
         cards.append(f"""
         <section class="card info">
           <h2>{index}. {html.escape(str(item.get('partName') or item.get('part_name') or 'Reper'))}</h2>
           <div class="meta">clasificare: {html.escape(str(item.get('classification') or 'no_bend_lines'))}</div>
-          <p>Piesa nu are linii de indoire detectate in TecZoneBEND. GEO-ul poate fi folosit ca reper plat, fara verificare Bend-Tech.</p>
+          <p>Piesa nu are linii de indoire detectate in TecZoneBEND.{html.escape(review)}</p>
           <p>{html.escape(str(item.get('reason') or item.get('message') or ''))}</p>
         </section>
         """)

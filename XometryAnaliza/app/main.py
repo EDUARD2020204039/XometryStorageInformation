@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from .agents import process_jobs
 from .bend_artifacts import artifact_path, is_no_bend_info, read_bend_summary
 from .geo_files import read_remote_file, read_remote_geo_file
+from .ofertare_client import fetch_automation_jobs
 from .metrics import observability_summary, prometheus_metrics
 from .store import find_job_by_offer_id, list_jobs, read_events
 from . import queue_store, settings, watchdog
@@ -727,9 +728,15 @@ def dashboard() -> HTMLResponse:
       const requested = Number(item.geo_requested_count || 0);
       const elapsed = Number(item.analysis_elapsed_seconds || 0);
       const duration = Number(item.process_duration_seconds || 0);
+      const current = item.current_part ? `<div class="meta"><strong>Piesa curenta:</strong> ${esc(item.current_part)}${item.current_index ? ` (${item.current_index}/${item.total_parts || '?'})` : ''}</div>` : '';
+      const phase = item.phase ? `<div class="meta"><strong>Etapa:</strong> ${esc(item.phase)}</div>` : '';
+      const timings = Array.isArray(item.timings) ? item.timings.slice(-6) : [];
+      const timingHtml = timings.length
+        ? `<div class="meta"><strong>Timpi:</strong> ${timings.map(t => `${esc(t.name || 'pas')} ${fmtDuration(t.seconds || 0)}`).join(' · ')}</div>`
+        : '';
       const diagnostic = item.error ? `<div class="meta bad">${esc(item.error)}</div>` : '';
       const action = item.failure_action ? `<div class="meta">${esc(item.failure_action)}</div>` : '';
-      return `<div class="meta">piese: ${processed}/${identified || '-'} procesate - GEO: ${ready}/${requested} gata - in analiza: ${fmtDuration(elapsed)}${duration ? ` - durata finala: ${fmtDuration(duration)}` : ''}</div>${diagnostic}${action}`;
+      return `${phase}${current}<div class="meta">piese: ${processed}/${identified || '-'} procesate - GEO: ${ready}/${requested} gata - in analiza: ${fmtDuration(elapsed)}${duration ? ` - durata finala: ${fmtDuration(duration)}` : ''}</div>${timingHtml}${diagnostic}${action}`;
     }
     function projectButton(item){
       if (!item?.offer_id) return '';
@@ -855,12 +862,21 @@ def dashboard() -> HTMLResponse:
       renderXometrySession(xometrySession || {});
       const paused = data.paused;
       const pauseUntil = data.paused_until ? new Date(data.paused_until * 1000).toLocaleTimeString() : '';
-      document.getElementById('summary').innerHTML = `<span class="pill">${data.running?'laptop lucreaza':paused?'Dorina ocupata':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
+      const laptopRunning = !!data.ofertare_active || (Array.isArray(data.ofertare_running) && data.ofertare_running.length > 0);
+      document.getElementById('summary').innerHTML = `<span class="pill">${laptopRunning?'laptop lucreaza':paused?'Dorina ocupata':'idle'}</span> <span class="pill">${data.queued_count} sheet/laser in coada</span>`;
       const active = data.active;
+      const ofertareActive = data.ofertare_active;
       const pausedItem = data.paused_item;
       const idleText = paused ? `Dorina este ocupata in TecZone. Reiau coada la ${pauseUntil}.<div class="meta">${data.pause_reason||''}</div>` : 'Laptopul nu proceseaza desfasurata acum.';
       const pausedHtml = pausedItem ? `<div class="id">${jobName(pausedItem)}</div><div class="meta">${esc(data.pause_reason||'')}</div>${progressHtml(pausedItem)}${projectButton(pausedItem)}` : idleText;
-      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${active?'active':paused?'active':'idle'}">${active?`<div class="id">${jobName(active)}</div><div class="meta">${esc(active.title||'')}</div><div class="meta">pornit: ${new Date((active.started_ts||0)*1000).toLocaleString()}</div>${progressHtml(active)}${projectButton(active)}`:pausedHtml}</div>`;
+      const live = ofertareActive;
+      const mismatch = ofertareActive && active && String(ofertareActive.offer_id || '') && String(active.offer_id || '') && String(ofertareActive.offer_id) !== String(active.offer_id)
+        ? `<div class="meta bad">Atentie: laptopul lucreaza la alta oferta decat itemul activ din coada XometryAnaliza.</div>`
+        : '';
+      const internalRunning = !live && active
+        ? `<div class="meta bad">XometryAnaliza are ${jobName(active)} marcat running, dar laptopul Ofertare nu raporteaza lucru activ.</div>${progressHtml(active)}`
+        : '';
+      document.getElementById('active').innerHTML = `<h2>Laptop TecZone activ</h2><div class="panel ${live?'active':paused?'active':'idle'}">${live?`<div class="id">${jobName(live)}</div><div class="meta">${esc(live.label || live.title || '')}</div><div class="meta">pornit: ${new Date((live.started_ts||0)*1000).toLocaleString()}</div>${mismatch}${progressHtml(live)}${projectButton(live)}`:`${pausedHtml}${internalRunning}`}</div>`;
       document.getElementById('queue').innerHTML = (data.queued||[]).map(jobHtml).join('') || '<div class="panel">Nu sunt joburi sheet/laser in asteptare.</div>';
       document.getElementById('logs').textContent = (logs.items||[]).reverse().map(x => `${new Date((x.ts||0)*1000).toLocaleTimeString()} ${x.type}: ${x.message}`).join('\\n');
     }
@@ -1055,10 +1071,88 @@ def _compact_queue_item(item: dict[str, Any] | None) -> dict[str, Any] | None:
     return {key: item.get(key) for key in keys if key in item}
 
 
+def _compact_ofertare_job(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not item:
+        return None
+    metadata = item.get("metadata") or {}
+    result = item.get("result") or {}
+    trutops = result.get("trutops") or []
+    ready = len([row for row in trutops if isinstance(row, dict) and row.get("geo_exists") is True])
+    requested = len([row for row in trutops if isinstance(row, dict) and (row.get("targetPath") or row.get("target_path"))])
+    total = int(item.get("totalParts") or requested or 0)
+    current_index = int(item.get("currentIndex") or 0)
+    offer_id = str(item.get("offerId") or "")
+    source_url = str(metadata.get("source_url") or "")
+    return {
+        "id": item.get("id"),
+        "label": item.get("label") or "",
+        "status": item.get("status") or "",
+        "phase": item.get("phase") or "",
+        "job_id": item.get("jobId") or item.get("sourceRef") or item.get("label") or "",
+        "offer_id": offer_id,
+        "url": source_url,
+        "project_root": item.get("projectRoot") or result.get("projectRoot") or metadata.get("project_path") or "",
+        "project_name": Path(str(item.get("projectRoot") or result.get("projectRoot") or metadata.get("project_path") or "")).name,
+        "current_part": item.get("currentPart") or "",
+        "current_index": current_index,
+        "total_parts": total,
+        "identified_parts_count": total,
+        "processed_parts_count": ready,
+        "geo_ready_count": ready,
+        "geo_requested_count": requested,
+        "analysis_elapsed_seconds": item.get("elapsedSeconds") or 0,
+        "started_ts": item.get("startedAtTs") or 0,
+        "updated_ts": item.get("updatedAtTs") or 0,
+        "timings": item.get("timings") or result.get("timings") or [],
+        "source": "ofertare-laptop",
+    }
+
+
+def _ofertare_live_state() -> dict[str, Any]:
+    try:
+        data = fetch_automation_jobs()
+        return {
+            "ok": True,
+            "active": _compact_ofertare_job(data.get("active")),
+            "running": [_compact_ofertare_job(item) for item in data.get("running") or []],
+            "jobs": [_compact_ofertare_job(item) for item in data.get("jobs") or []],
+        }
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "active": None, "running": [], "jobs": []}
+
+
+def _enrich_ofertare_job(laptop_job: dict[str, Any] | None, queue_item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not laptop_job or not queue_item:
+        return laptop_job
+    laptop_url = str(laptop_job.get("url") or "").strip()
+    queue_url = str(queue_item.get("url") or "").strip()
+    laptop_offer = str(laptop_job.get("offer_id") or "").strip()
+    queue_offer = str(queue_item.get("offer_id") or "").strip()
+    same_offer = bool(laptop_offer and queue_offer and laptop_offer == queue_offer)
+    same_url = bool(laptop_url and queue_url and laptop_url == queue_url)
+    if not (same_offer or same_url):
+        return laptop_job
+    return {
+        **laptop_job,
+        "job_id": queue_item.get("job_id") or laptop_job.get("job_id") or "",
+        "title": queue_item.get("title") or laptop_job.get("title") or "",
+        "offer_id": queue_item.get("offer_id") or laptop_job.get("offer_id") or "",
+        "url": queue_item.get("url") or laptop_job.get("url") or "",
+    }
+
+
 def _queue_live_state() -> dict[str, Any]:
     state = queue_store.get_queue_state()
+    ofertare = _ofertare_live_state()
+    active = _compact_queue_item(state.get("active"))
+    ofertare_active = _enrich_ofertare_job(ofertare.get("active"), active)
+    ofertare_running = [_enrich_ofertare_job(item, active) for item in ofertare.get("running") or []]
     return {
-        "active": _compact_queue_item(state.get("active")),
+        "active": active,
+        "ofertare_active": ofertare_active,
+        "ofertare_running": ofertare_running,
+        "ofertare_ok": ofertare.get("ok"),
+        "ofertare_error": ofertare.get("error") or "",
         "paused_item": _compact_queue_item(state.get("paused_item")),
         "queued": [_compact_queue_item(item) for item in state.get("queued") or []],
         "running": bool(state.get("running")),

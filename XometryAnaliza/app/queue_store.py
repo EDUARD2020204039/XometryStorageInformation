@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from .agents import process_job
-from .ofertare_client import find_project_folder_for_job
+from .ofertare_client import fetch_automation_jobs, find_project_folder_for_job
 from .store import append_event, list_jobs, load_job_state, safe_id, save_job_state
 from . import settings
 
@@ -571,17 +571,48 @@ def ensure_worker() -> bool:
         return True
 
 
+def _ofertare_has_same_live_job(active: dict[str, Any]) -> bool:
+    active_url = str((active.get("job") or {}).get("url") or (active.get("job") or {}).get("link") or active.get("url") or "").strip()
+    active_offer = str(active.get("offer_id") or (active.get("job") or {}).get("offer_id") or "").strip()
+    if not active_url and not active_offer:
+        return False
+    try:
+        data = fetch_automation_jobs()
+    except Exception:
+        return False
+    live_items = [data.get("active"), *(data.get("running") or [])]
+    for item in live_items:
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata") or {}
+        live_url = str(metadata.get("source_url") or "").strip()
+        live_offer = str(item.get("offerId") or "").strip()
+        if active_url and live_url and active_url == live_url:
+            return True
+        if active_offer and live_offer and active_offer == live_offer:
+            return True
+    return False
+
+
 def recover_and_start() -> dict[str, Any]:
     with _LOCK:
         data = _read()
         active = data.get("active")
         if active:
-            active["status"] = "queued"
-            active.pop("started_ts", None)
-            data["queued"] = [active] + (data.get("queued") or [])
-            data["active"] = None
-            _write(data)
-            append_event("queue.recover", f"Recovered stale active job {active.get('job_id')}", job_id=active.get("job_id"))
+            if _ofertare_has_same_live_job(active):
+                append_event(
+                    "queue.recover_attached",
+                    f"Kept active job {active.get('job_id')} attached to live Ofertare job",
+                    job_id=active.get("job_id"),
+                    offer_id=active.get("offer_id"),
+                )
+            else:
+                active["status"] = "queued"
+                active.pop("started_ts", None)
+                data["queued"] = [active] + (data.get("queued") or [])
+                data["active"] = None
+                _write(data)
+                append_event("queue.recover", f"Recovered stale active job {active.get('job_id')}", job_id=active.get("job_id"))
 
         seen = set(str(value) for value in data.get("seen_job_ids") or [])
         seen_offers = set(str(value) for value in data.get("seen_offer_ids") or [])

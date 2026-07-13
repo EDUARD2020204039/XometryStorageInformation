@@ -83,6 +83,16 @@ def find_project_folder_for_job(job_id: str) -> dict[str, Any] | None:
     return None
 
 
+def fetch_automation_jobs() -> dict[str, Any]:
+    response = requests.get(
+        f"{settings.OFERTARE_AUTOMATA_URL}/api/automation/jobs",
+        headers=_headers(),
+        timeout=(settings.OFERTARE_AUTOMATA_CONNECT_TIMEOUT, 8),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def poll_automation_job(status_url: str, headers: dict[str, str]) -> dict[str, Any]:
     deadline = time.time() + settings.OFERTARE_AUTOMATA_READ_TIMEOUT
     stall_deadline = time.time() + settings.OFERTARE_AUTOMATA_STALL_TIMEOUT if settings.OFERTARE_AUTOMATA_STALL_TIMEOUT > 0 else 0
