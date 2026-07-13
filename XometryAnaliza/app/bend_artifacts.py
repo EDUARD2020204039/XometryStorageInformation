@@ -10,6 +10,37 @@ from typing import Any
 from . import settings
 
 
+NO_BEND_CLASSIFICATIONS = {
+    "no_bend_lines",
+    "no_bends",
+    "flat_no_bends",
+    "bendless_part",
+    "no_bend_tech_needed",
+}
+NO_BEND_REASON_TOKENS = (
+    "no bend lines",
+    "cannot create bend-tech",
+    "f0154",
+    "nu are linii de indoire",
+    "nu are indoiri",
+    "fara indoiri",
+    "fara linii de indoire",
+    "no bends",
+)
+
+
+def is_no_bend_info(item: dict[str, Any] | str) -> bool:
+    if isinstance(item, dict):
+        classification = str(item.get("classification") or "").lower()
+        reason = str(item.get("reason") or item.get("message") or item.get("status") or "")
+        if classification in NO_BEND_CLASSIFICATIONS:
+            return True
+    else:
+        reason = str(item or "")
+    lowered = reason.lower()
+    return bool(lowered and any(token in lowered for token in NO_BEND_REASON_TOKENS))
+
+
 def _artifact_dir(offer_id: str) -> Path:
     settings.ensure_dirs()
     path = settings.DATA_DIR / "artifacts" / str(offer_id or "unknown") / "bend"
@@ -18,6 +49,8 @@ def _artifact_dir(offer_id: str) -> Path:
 
 
 def _is_issue(item: dict[str, Any]) -> bool:
+    if is_no_bend_info(item):
+        return False
     status = str(item.get("status") or "").lower()
     classification = str(item.get("classification") or "").lower()
     reason = str(item.get("reason") or item.get("message") or "")
@@ -32,7 +65,9 @@ def _is_issue(item: dict[str, Any]) -> bool:
 
 def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo_items: list[dict[str, Any]]) -> dict[str, Any]:
     trutops = result.get("trutops") or []
-    warnings = result.get("warnings") or []
+    raw_warnings = result.get("warnings") or []
+    warnings = [item for item in raw_warnings if not is_no_bend_info(item)]
+    info_items = [item for item in trutops if isinstance(item, dict) and is_no_bend_info(item)]
     issues = [item for item in trutops if isinstance(item, dict) and _is_issue(item)]
     has_issues = bool(issues or warnings)
     folder = _artifact_dir(offer_id)
@@ -45,6 +80,7 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
         "status": "probleme la indoire" if has_issues else "fara probleme la indoire",
         "issue_count": len(issues),
         "warning_count": len(warnings),
+        "info_count": len(info_items),
         "created_ts": time.time(),
         "artifacts": [],
     }
@@ -53,6 +89,8 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
         **summary,
         "issues": issues,
         "warnings": warnings,
+        "info_items": info_items,
+        "raw_warnings": raw_warnings,
         "geo_items": geo_items,
     }
     (folder / "bend_report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -75,6 +113,16 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
         </section>
         """)
 
+    for index, item in enumerate(info_items, start=1):
+        cards.append(f"""
+        <section class="card info">
+          <h2>{index}. {html.escape(str(item.get('partName') or item.get('part_name') or 'Reper'))}</h2>
+          <div class="meta">clasificare: {html.escape(str(item.get('classification') or 'no_bend_lines'))}</div>
+          <p>Piesa nu are linii de indoire detectate in TecZoneBEND. GEO-ul poate fi folosit ca reper plat, fara verificare Bend-Tech.</p>
+          <p>{html.escape(str(item.get('reason') or item.get('message') or ''))}</p>
+        </section>
+        """)
+
     if not cards:
         cards.append('<section class="card ok"><h2>Fara probleme la indoire</h2><p>Agentul nu a raportat erori de indoire pentru fisierele procesate.</p></section>')
 
@@ -90,7 +138,7 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
     h1{{margin:0;font-size:22px}} .sub{{margin-top:5px;color:#cbd5e1}}
     main{{display:grid;gap:14px;padding:18px 22px}}
     .card{{border:1px solid #d8e0ea;border-radius:8px;background:white;padding:14px 16px;box-shadow:0 8px 24px rgba(15,23,42,.08)}}
-    .issue{{border-left:5px solid #f5222d}} .ok{{border-left:5px solid #52c41a}}
+    .issue{{border-left:5px solid #f5222d}} .ok{{border-left:5px solid #52c41a}} .info{{border-left:5px solid #0ea5e9}}
     h2{{margin:0 0 6px;font-size:17px}} h3{{font-size:13px;margin:12px 0 6px;color:#334155}}
     .meta{{font-size:12px;color:#64748b}} li{{margin:3px 0}} p{{line-height:1.45}}
   </style>
@@ -98,7 +146,7 @@ def build_bend_artifacts(job_id: str, offer_id: str, result: dict[str, Any], geo
 <body>
   <header>
     <h1>{html.escape(summary['status'])}</h1>
-    <div class="sub">{html.escape(job_id)} &middot; oferta {html.escape(str(offer_id))} &middot; {len(issues)} probleme &middot; {len(warnings)} avertizari</div>
+    <div class="sub">{html.escape(job_id)} &middot; oferta {html.escape(str(offer_id))} &middot; {len(issues)} probleme &middot; {len(warnings)} avertizari &middot; {len(info_items)} info</div>
   </header>
   <main>{''.join(cards)}</main>
 </body>
@@ -150,7 +198,7 @@ def _write_bend_png(path: Path, summary: dict[str, Any], issues: list[dict[str, 
     draw.rounded_rectangle((28, 126, width - 28, height - 28), radius=12, fill="#ffffff", outline="#d8e0ea", width=2)
     draw.rectangle((28, 126, 38, height - 28), fill=accent)
     y = 154
-    draw.text((58, y), f"Probleme: {len(issues)}    Avertizari: {len(warnings)}", fill="#172033", font=head_font)
+    draw.text((58, y), f"Probleme: {len(issues)}    Avertizari: {len(warnings)}    Info: {summary.get('info_count') or 0}", fill="#172033", font=head_font)
     y += 44
 
     lines: list[str] = []

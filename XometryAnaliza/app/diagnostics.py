@@ -54,6 +54,12 @@ def _classify(text: str, output: dict[str, Any]) -> tuple[str, str, str]:
             "Documentatia/STEP nu a fost descarcata sau nu a fost gasita.",
             "Deschide oferta in browser, verifica download-ul documentatiei si apoi retrimite jobul.",
         )
+    if "no bend lines" in text or "cannot create bend-tech" in text or "f0154" in text:
+        return (
+            "no_bend_lines",
+            "TecZoneBEND a raportat ca piesa nu are linii de indoire.",
+            "Nu este blocant pentru reper plat; foloseste informatia ca semnal ca nu trebuie verificare Bend-Tech.",
+        )
     if "pagina de login" in text or "xometry_login_required" in text or "xometry_email" in text or "basic_email" in text or "capture.body: login=yes" in text:
         return (
             "xometry_login",

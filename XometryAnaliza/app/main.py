@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agents import process_jobs
-from .bend_artifacts import artifact_path, read_bend_summary
+from .bend_artifacts import artifact_path, is_no_bend_info, read_bend_summary
 from .geo_files import read_remote_file, read_remote_geo_file
 from .metrics import observability_summary, prometheus_metrics
 from .store import find_job_by_offer_id, list_jobs, read_events
@@ -1150,7 +1150,11 @@ def _bend_summary_from_geo_items(offer_id: str, job_id: str | None, geo_items: l
         return None
     issues = []
     warnings = []
+    info_items = []
     for item in geo_items:
+        if is_no_bend_info(item):
+            info_items.append(item)
+            continue
         status = str(item.get("status") or "").lower()
         classification = str(item.get("classification") or "").lower()
         reason = str(item.get("reason") or item.get("message") or "")
@@ -1177,6 +1181,8 @@ def _bend_summary_from_geo_items(offer_id: str, job_id: str | None, geo_items: l
         "status": "probleme la indoire" if has_issues else "fara probleme la indoire",
         "issue_count": len(issues),
         "warning_count": len(warnings),
+        "info_count": len(info_items),
+        "info_items": info_items,
         "source": "geo_items",
         "artifacts": [],
     }
