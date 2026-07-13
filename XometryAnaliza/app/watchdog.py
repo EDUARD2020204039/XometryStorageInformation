@@ -196,6 +196,13 @@ def _check_recent_flow_errors() -> dict[str, Any]:
     cutoff = time.time() - settings.WATCHDOG_RECENT_ERROR_SECONDS
     events = [item for item in read_events(300) if float(item.get("ts") or 0) >= cutoff]
     hits = []
+    ignored_markers = (
+        "login=no",
+        "xometry_error=no",
+        "session ok",
+        "scrape_ok",
+        "graphql_ok",
+    )
     markers = (
         "login=yes",
         "xometry_error=yes",
@@ -212,6 +219,8 @@ def _check_recent_flow_errors() -> dict[str, Any]:
             continue
         message = str(item.get("message") or "")
         lowered = f"{event_type} {message}".lower()
+        if any(marker in lowered for marker in ignored_markers):
+            continue
         if any(marker in lowered for marker in markers):
             hits.append({
                 "ts": item.get("ts"),
