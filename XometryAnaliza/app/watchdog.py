@@ -90,6 +90,7 @@ def _check_xometry_session() -> dict[str, Any]:
         "phase": data.get("phase") or "",
         "age_seconds": int(age) if age is not None else None,
         "api_ok": bool(data.get("api_ok")),
+        "api_reason": data.get("api_reason") or "",
         "job_board": bool(data.get("job_board")),
         "auth_token_present": bool(data.get("auth_token_present")),
         "jobs_count": data.get("jobs_count"),
@@ -107,11 +108,24 @@ def _check_xometry_session() -> dict[str, Any]:
             details,
             severity="warning",
         )
-    if not data.get("api_ok"):
-        return _scenario("xometry_session", False, f"Tokenul/API Xometry nu este valid: {data.get('api_reason')}", details)
     jobs_count = data.get("jobs_count")
     if data.get("phase") == "scrape" and isinstance(jobs_count, int) and jobs_count <= 0:
         return _scenario("xometry_session", False, "Scrape Xometry a returnat 0 joburi.", details)
+    if not data.get("api_ok"):
+        api_reason = str(data.get("api_reason") or "")
+        ui_session_ok = bool(data.get("job_board") or data.get("total_order_value"))
+        scrape_has_jobs = data.get("phase") == "scrape" and isinstance(jobs_count, int) and jobs_count > 0
+        transient_api_reasons = ("graphql_errors", "timeout", "temporarily unavailable", "connection")
+        if ui_session_ok and data.get("auth_token_present") and (
+            scrape_has_jobs or any(marker in api_reason.lower() for marker in transient_api_reasons)
+        ):
+            return _scenario(
+                "xometry_session",
+                True,
+                f"Login Xometry si scrape validate; API GraphQL temporar instabil: {api_reason or 'unknown'}.",
+                details,
+            )
+        return _scenario("xometry_session", False, f"Tokenul/API Xometry nu este valid: {api_reason}", details)
     return _scenario("xometry_session", True, "Login Xometry, token si API validate.", details)
 
 
@@ -202,6 +216,7 @@ def _check_recent_flow_errors() -> dict[str, Any]:
         "session ok",
         "scrape_ok",
         "graphql_ok",
+        "ui_ok_api_warning:graphql_errors",
     )
     markers = (
         "login=yes",
