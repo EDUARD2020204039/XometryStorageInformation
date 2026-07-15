@@ -238,6 +238,19 @@ def _classify_ofertare_failure(result: dict[str, Any]) -> dict[str, Any]:
                 "message": reason or "Ofertare nu a gasit piese/STEP pentru TecZone.",
                 "action": "Verifica documentatia descarcata si retrimite jobul dupa ce exista STEP in DOC.",
             }
+        status = str(item.get("status") or "").lower()
+        if status == "failed" or classification in {
+            "open_source_failed",
+            "teczone_unfold_failed",
+            "teczone_export_failed",
+            "teczone_error",
+        }:
+            return {
+                "status": "failed",
+                "failure_type": classification or "teczone_failed",
+                "message": reason or "TecZone nu a reusit sa proceseze piesa pentru GEO.",
+                "action": "Deschide dosarul proiectului si raportul diagnostic; verifica fisierul STEP si starea TecZone, apoi retrimite jobul.",
+            }
     return {}
 
 
