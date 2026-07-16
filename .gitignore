@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+.local-credentials.env
 .edge-xometry-profile/
 __pycache__/
 *.pyc
