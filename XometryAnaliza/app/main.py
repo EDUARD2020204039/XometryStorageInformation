@@ -392,6 +392,8 @@ def _history_items(limit: int = 300) -> list[dict[str, Any]]:
             continue
         job = state.get("job") or {}
         result = sheet.get("ofertare_result") or {}
+        diagnostic = sheet.get("diagnostic") or {}
+        hermes = diagnostic.get("hermes") or {}
         geo_items = sheet.get("geo_items") or []
         ready_geo_count = len([item for item in geo_items if item.get("geo_exists") is True])
         requested_geo_count = len([item for item in geo_items if item.get("target_path")])
@@ -424,6 +426,11 @@ def _history_items(limit: int = 300) -> list[dict[str, Any]]:
                 "error": sheet.get("error") or "",
                 "failure_action": sheet.get("failure_action") or "",
                 "failure_type": sheet.get("failure_type") or "",
+                "diagnostic_category": diagnostic.get("category") or "",
+                "diagnostic_summary": diagnostic.get("summary") or "",
+                "diagnostic_report_path": diagnostic.get("report_path") or "",
+                "hermes_status": hermes.get("status") or "",
+                "hermes_error": hermes.get("error") or "",
             }
         )
     return sorted(items, key=lambda item: float(item.get("updated_ts") or 0), reverse=True)
@@ -514,6 +521,18 @@ def agent_history_view(limit: int = 300) -> HTMLResponse:
         error_html = html.escape(error)
         if failure_action:
             error_html += f'<div class="muted">{html.escape(failure_action)}</div>'
+        hermes_status = str(item.get("hermes_status") or "")
+        hermes_error = str(item.get("hermes_error") or "")
+        diagnostic_category = str(item.get("diagnostic_category") or "")
+        if hermes_status or diagnostic_category:
+            diagnostic_bits = []
+            if diagnostic_category:
+                diagnostic_bits.append(f"diag: {diagnostic_category}")
+            if hermes_status:
+                diagnostic_bits.append(f"Hermes: {hermes_status}")
+            error_html += f'<div class="muted">{html.escape(" | ".join(diagnostic_bits))}</div>'
+        if hermes_error:
+            error_html += f'<div class="muted">{html.escape(hermes_error[:180])}</div>'
         repeat_identifier = xometry_url or job_id or offer_id
         repeat_button = (
             f'<button type="button" class="button repeat" data-repeat="{html.escape(repeat_identifier, quote=True)}">Repeta</button>'

@@ -206,6 +206,27 @@ def _check_ofertare_api() -> dict[str, Any]:
         )
 
 
+def _check_hermes_api() -> dict[str, Any]:
+    if not settings.HERMES_DIAGNOSTICS_ENABLED:
+        return _scenario("hermes_api", True, "Hermes diagnostics este dezactivat.", {"enabled": False})
+    if not settings.HERMES_AGENT_URL:
+        return _scenario("hermes_api", True, "Hermes diagnostics nu are URL configurat.", {"enabled": True})
+
+    base = settings.HERMES_AGENT_URL.rstrip("/")
+    url = f"{base}/health"
+    details = {"enabled": True, "url": url, "model": settings.HERMES_AGENT_MODEL}
+    try:
+        response = requests.get(url, timeout=(3, 6))
+        details["status_code"] = response.status_code
+        details["body"] = response.text[:300]
+        if response.ok:
+            return _scenario("hermes_api", True, "Hermes raspunde la health.", details)
+        return _scenario("hermes_api", False, f"Hermes health raspunde HTTP {response.status_code}.", details, severity="warning")
+    except Exception as exc:
+        details["error"] = f"{type(exc).__name__}: {exc}"
+        return _scenario("hermes_api", False, f"Hermes nu raspunde: {type(exc).__name__}: {exc}", details, severity="warning")
+
+
 def _check_recent_flow_errors() -> dict[str, Any]:
     cutoff = time.time() - settings.WATCHDOG_RECENT_ERROR_SECONDS
     events = [item for item in read_events(300) if float(item.get("ts") or 0) >= cutoff]
@@ -261,7 +282,13 @@ def _check_recent_flow_errors() -> dict[str, Any]:
 
 
 def run_checks(source: str = "manual") -> dict[str, Any]:
-    scenarios = [_check_xometry_session(), _check_queue_worker(), _check_ofertare_api(), _check_recent_flow_errors()]
+    scenarios = [
+        _check_xometry_session(),
+        _check_queue_worker(),
+        _check_ofertare_api(),
+        _check_hermes_api(),
+        _check_recent_flow_errors(),
+    ]
     failed = [item for item in scenarios if not item.get("ok")]
     status = "ok" if not failed else ("warning" if all(item.get("status") == "warning" for item in failed) else "error")
     payload = {
