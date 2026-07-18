@@ -1,7 +1,12 @@
 // Xometry Price Calculator Extension (v2.65)
 // Content Script v20 - Thickness Normalization
 
-(function () {
+chrome.storage.local.get({ extensionEnabled: true }, ({ extensionEnabled }) => {
+    if (!extensionEnabled) {
+        console.info("[XomExt] Extension disabled from settings.");
+        return;
+    }
+    const XOMETRY_BACKEND_URL = globalThis.XOMETRY_EXTENSION_CONFIG?.backendBaseUrl || "https://xometrystorageinformation.habaresearch.eu";
     let latestAgentGeoStatus = null;
     let latestAgentGeoSource = null;
     let latestAgentGeoToastKey = null;
@@ -377,9 +382,11 @@
             if (!chrome.runtime?.id) return;
             chrome.runtime.sendMessage({ type: 'CHECK_STOCK', material: material, thickness: thickness }, (res) => {
                 if (chrome.runtime.lastError) return;
+                if (res?.disabled) return;
 
                 let label = "Err", color = "red", bg = "#fff1f0", border = "#ffa39e", tooltip = "Error";
-                let debugUrl = `http://86.123.232.23:2222/show_all?material=${material}&grosime=${thickness}`;
+                const stockUiBaseUrl = globalThis.XOMETRY_EXTENSION_CONFIG?.stockUiBaseUrl || "";
+                let debugUrl = stockUiBaseUrl ? `${stockUiBaseUrl}/show_all?material=${encodeURIComponent(material)}&grosime=${encodeURIComponent(thickness)}` : null;
 
                 if (res && res.success && res.data) {
                     const count = res.data.count || (res.data.items ? res.data.items.length : 0);
@@ -416,7 +423,7 @@
         row.className = 'xom-stock-row';
         row.innerHTML = `<span style="font-size:1.1em">🏭</span> <b style="margin-left:4px">${label}</b>`;
         Object.assign(row.style, { color: color, backgroundColor: bg, border: `1px solid ${border}`, padding: '2px 8px', borderRadius: '4px', marginTop: '4px', display: 'flex', width: 'fit-content', fontSize: '12px', position: 'relative', cursor: 'pointer' });
-        row.addEventListener('click', (e) => { e.stopPropagation(); window.open(url, '_blank'); });
+        if (url) row.addEventListener('click', (e) => { e.stopPropagation(); window.open(url, '_blank'); });
         const tt = document.createElement('div');
         tt.innerHTML = tooltip;
         Object.assign(tt.style, { position: 'absolute', bottom: '115%', left: '0', bgcolor: 'white', border: '1px solid #bbb', padding: '8px', display: 'none', minWidth: '240px', zIndex: '10000', backgroundColor: 'white', boxShadow: '0 3px 6px rgba(0,0,0,0.2)', borderRadius: '4px' });
@@ -645,7 +652,7 @@
     function backendOfferUrl(source, backendUrl) {
         if (!backendUrl) return '#';
         if (/^https?:\/\//i.test(backendUrl)) return backendUrl;
-        return `${String(source || 'http://192.168.2.23:10000').replace(/\/$/, '')}${backendUrl}`;
+        return `${String(source || XOMETRY_BACKEND_URL).replace(/\/$/, '')}${backendUrl}`;
     }
 
     function injectDosarTitleControls(status, source) {
@@ -735,7 +742,7 @@
         const data = buildOffer();
         if (!data || !data.offer_id || data.offer_id === "unknown") return;
         if (!document.getElementById('xom-dosar-create-btn')) {
-            injectDosarTitleControls({ has_dosar: false, current: null, references_with_dosar: [] }, 'http://192.168.2.23:10000');
+            injectDosarTitleControls({ has_dosar: false, current: null, references_with_dosar: [] }, XOMETRY_BACKEND_URL);
         }
     }
 
@@ -1135,7 +1142,7 @@
                 const linkId = internalId || offerId;
                 const link = document.createElement('a');
                 link.id = 'xom-backend-link';
-                link.href = `http://86.123.232.23:10000/offer/${linkId}`;
+                link.href = `${XOMETRY_BACKEND_URL}/offer/${linkId}`;
                 link.target = '_blank';
                 link.innerHTML = `🔗 Open Backend (#${linkId})`;
                 Object.assign(link.style, {
@@ -1654,7 +1661,7 @@
         // Tooltip for details
         let tooltipList = items.map(i => {
             const label = i.title || i.job_name || "Job " + i.offer_id;
-            const url = BackendUI ? 'http://86.123.232.23:10000/offer/' + (i.id || i.offer_id) : '#';
+            const url = BackendUI ? `${XOMETRY_BACKEND_URL}/offer/` + (i.id || i.offer_id) : '#';
             return `<div><a href="${url}" target="_blank" style="display:block; padding:2px 0;">${label}</a></div>`;
         }).join('');
 
@@ -1753,4 +1760,4 @@
         overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     }
 
-})();
+});

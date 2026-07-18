@@ -23,6 +23,8 @@ services:
       TELEGRAM_SHEET_FAILURE_LOGS: "false"
       TELEGRAM_GEO_LOGS: "false"
       MCP_TOKEN: "${XOMETRY_ANALIZA_MCP_TOKEN:-}"
+      BACKEND_URL: "http://xometry-app:10000"
+      BACKEND_PUBLIC_URL: "${XSI_PUBLIC_BASE_URL:-https://xometrystorageinformation.habaresearch.eu}"
       LOCAL_DOSAR_ROOT: "/mnt/xLucru"
       LOCAL_DOSAR_WINDOWS_ROOT: '\\192.168.2.6\d\00 COTATII IN LUCRU'
     ports:
@@ -38,9 +40,14 @@ services:
       - "10000:10000"
     environment:
       PORT: "10000"
-      DATABASE_URL: "${DATABASE_URL:-}"
+      DATABASE_URL: "${DATABASE_URL:-sqlite:////app/data/xometry_offers.db}"
       DOSAR_ROOT_PATH: "/mnt/xLucru"
       XOMETRY_AGENT_URL: "http://xometryanaliza:4468"
+      XOMETRY_AGENT_PUBLIC_URL: "${XOMETRY_AGENT_PUBLIC_URL:-https://qa.habaresearch.eu}"
+      XSI_PUBLIC_BASE_URL: "${XSI_PUBLIC_BASE_URL:-https://xometrystorageinformation.habaresearch.eu}"
+      XSI_API_AUTH_REQUIRED: "${XSI_API_AUTH_REQUIRED:-false}"
+      XSI_API_TOKEN: "${BACKEND_API_KEY:-}"
+      XSI_CORS_ORIGINS: "${XSI_CORS_ORIGINS:-https://partner.xometry.eu}"
     volumes:
       - app_data:/app/data
       - app_images:/app/static/images
@@ -61,7 +68,7 @@ services:
       BOT_ENTRYPOINT: main.py
       BACKEND_URL: "http://xometry-app:10000"
       AGENT_URL: "http://xometryanaliza:4468"
-      AGENT_PUBLIC_URL: "http://192.168.2.23:4468"
+      AGENT_PUBLIC_URL: "${XOMETRY_AGENT_PUBLIC_URL:-https://qa.habaresearch.eu}"
       AGENT_TIMEOUT: "10"
     env_file:
       - xometry_bot/.env
@@ -81,7 +88,7 @@ services:
       BOT_ENTRYPOINT: bot_app.py
       BACKEND_URL: "http://xometry-app:10000"
       AGENT_URL: "http://xometryanaliza:4468"
-      AGENT_PUBLIC_URL: "http://192.168.2.23:4468"
+      AGENT_PUBLIC_URL: "${XOMETRY_AGENT_PUBLIC_URL:-https://qa.habaresearch.eu}"
       AGENT_TIMEOUT: "10"
     env_file:
       - xometry_bot/.env

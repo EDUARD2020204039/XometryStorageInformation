@@ -487,7 +487,22 @@ class SheetMetalLaserAgent:
                     action=failure.get("action"),
                 )
             output = _attach_diagnostic(job, result, output)
-            append_event("sheet.done", f"Sheet agent finished {job_id}: {status}", job_id=job_id, offer_id=offer_id, geo_items=geo_items)
+            diagnostic = output.get("diagnostic") or {}
+            append_event(
+                "sheet.done",
+                f"Sheet agent finished {job_id}: {status}",
+                job_id=job_id,
+                offer_id=offer_id,
+                status=status,
+                error=output.get("error"),
+                failure_type=output.get("failure_type"),
+                failure_action=output.get("failure_action"),
+                diagnostic_category=diagnostic.get("category"),
+                diagnostic_summary=diagnostic.get("summary"),
+                geo_ready_count=geo_ready_count,
+                geo_requested_count=geo_requested_count,
+                geo_items=geo_items,
+            )
             if geo_items and settings.TELEGRAM_GEO_LOGS:
                 first_geo = geo_items[0].get("target_path")
                 send_log(f"XometryAnaliza: GEO pentru {job_id}: {first_geo}")

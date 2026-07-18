@@ -1,17 +1,31 @@
 // Xometry Extension v2.10 - Background Service Worker
+importScripts("config.js");
 console.log("[BG] Service Worker Loaded");
 // Handles HTTP requests to Stock API and Local Logger
 
-const API_BASE = "";
+const API_BASE = XOMETRY_EXTENSION_CONFIG.stockApiBaseUrl;
 const API_KEY = "";
 const LOG_SERVER = "";
-const BACKEND_URLS = [];
+const BACKEND_URLS = [XOMETRY_EXTENSION_CONFIG.backendBaseUrl];
 const BACKEND_URL = BACKEND_URLS[0];
-const AGENT_URLS = [
-    "http://192.168.2.23:4468",
-    "http://86.123.232.23:4468",
-    "http://127.0.0.1:4468"
-];
+const AGENT_URLS = [XOMETRY_EXTENSION_CONFIG.agentBaseUrl];
+
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.storage.local.get(["extensionEnabled"], (stored) => {
+        if (typeof stored.extensionEnabled === "undefined") {
+            chrome.storage.local.set({ extensionEnabled: true });
+        }
+    });
+});
+
+async function backendHeaders(existing = {}) {
+    const headers = new Headers(existing);
+    try {
+        const stored = await chrome.storage.local.get(["xsiApiToken"]);
+        if (stored.xsiApiToken) headers.set("Authorization", `Bearer ${stored.xsiApiToken}`);
+    } catch (_) { }
+    return headers;
+}
 
 async function fetchBackend(path, options = {}) {
     const { timeout = 10000, ...fetchOptions } = options;
@@ -24,8 +38,10 @@ async function fetchBackend(path, options = {}) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
         try {
+            const headers = await backendHeaders(fetchOptions.headers || {});
             const resp = await fetch(url, {
                 ...fetchOptions,
+                headers,
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
@@ -49,7 +65,7 @@ const AnalysisManager = {
             this.sockets[partId].tabId = tabId;
         }
 
-        const wsUrl = `ws://86.123.232.23:10000/ws/${partId}`;
+        const wsUrl = `${XOMETRY_EXTENSION_CONFIG.backendBaseUrl.replace(/^http/, "ws")}/ws/${partId}`;
         logToLocalServer(`[BG-WS] Connecting to ${wsUrl}`);
 
         // Helper to send debug to content script
@@ -285,6 +301,7 @@ async function checkJobHistory(jobIdString, excludeOfferId) {
 }
 
 async function checkStock(material, thickness) {
+    if (!API_BASE) return { disabled: true, count: 0, items: [] };
     // Log intent
     logToLocalServer(`Checking Stock: ${material} ${thickness}mm`);
 

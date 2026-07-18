@@ -8,40 +8,27 @@
   },
   "permissions": [
     "storage",
-    "declarativeNetRequest",
     "downloads"
   ],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "ruleset_1",
-        "enabled": true,
-        "path": "rules.json"
-      }
-    ]
-  },
   "host_permissions": [
     "https://partner.xometry.eu/*",
-    "http://86.123.232.23:2222/*",
-    "http://127.0.0.1:3333/*",
-    "http://192.168.2.23:10000/*",
-    "http://86.123.232.23:10000/*",
-    "http://127.0.0.1:10000/*",
-    "http://192.168.2.23:4468/*",
-    "http://86.123.232.23:4468/*",
-    "http://127.0.0.1:4468/*",
-    "ws://192.168.2.23:10000/*",
-    "ws://86.123.232.23:10000/*"
+    "https://xometrystorageinformation.habaresearch.eu/*",
+    "https://xsi.habaresearch.eu/*",
+    "https://qa.habaresearch.eu/*",
+    "wss://xometrystorageinformation.habaresearch.eu/*",
+    "wss://xsi.habaresearch.eu/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
+  "options_page": "options.html",
   "content_scripts": [
     {
       "matches": [
         "https://partner.xometry.eu/*"
       ],
       "js": [
+        "config.js",
         "content_v20.js"
       ],
       "css": [
