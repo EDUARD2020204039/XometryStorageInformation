@@ -9,14 +9,15 @@ from logging.handlers import RotatingFileHandler
 from uuid import uuid4
 from typing import Dict, List, Optional
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from time import perf_counter
 from pydantic import BaseModel
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Form, HTTPException, Depends, Body
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import String as db_String
+from sqlalchemy import String as db_String, func, text as db_text
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 import pandas as pd
@@ -32,6 +33,9 @@ from sentry_sdk.integrations.logging import LoggingIntegration
 from xometry.db import init_db, get_db
 from xometry.models import Offer, Part, Attachment, Order
 from xometry.image_utils import download_and_save_image, cleanup_old_images
+from xometry.security import require_ingest_auth
+from xometry.settings import settings
+from xometry.api_v1 import router as api_v1_router
 
 # Încarcă variabilele de mediu
 load_dotenv()
@@ -205,12 +209,14 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-app = FastAPI(title="Xometry Offer Helper", version="1.0.0")
+app = FastAPI(title="Xometry Offer Helper", version=settings.app_version)
+app.include_router(api_v1_router)
 
 # Configurare CORS pentru extensia Chrome
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=list(settings.cors_origins),
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -221,11 +227,11 @@ app.add_middleware(
 async def request_context_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or uuid4().hex[:12]
     token = _request_id_ctx.set(request_id)
-    started = datetime.utcnow()
+    started = perf_counter()
     try:
         response = await call_next(request)
     finally:
-        elapsed_ms = (datetime.utcnow() - started).total_seconds() * 1000
+        elapsed_ms = (perf_counter() - started) * 1000
         logger.debug(
             "HTTP %s %s completed in %.2fms",
             request.method,
@@ -265,12 +271,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 # Inițializează baza de date
-database_url = os.getenv('DATABASE_URL', 'sqlite:///./data/app.db')
+database_url = settings.database_url
 init_db(database_url)
 
-# Configurare template-uri și fișiere statice
-templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Configurare template-uri și fișiere statice. Folosim căi absolute pentru ca
+# aplicația să poată porni identic din Docker, teste sau orice director curent.
+APP_ROOT = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(APP_ROOT / "templates"))
+app.mount("/static", StaticFiles(directory=str(APP_ROOT / "static")), name="static")
 
 def _safe_slug(text: str) -> str:
     s = (text or 'reper').strip()
@@ -638,18 +646,36 @@ async def health_check():
     try:
         return {
             "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
-            "version": "1.0.0",
-            "database": "connected"
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "version": settings.app_version,
+            "environment": settings.environment,
+            "database": "configured",
+            "api_auth_required": settings.api_auth_required,
+            "public_base_url": settings.public_base_url,
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return {
             "status": "unhealthy",
             "timestamp": datetime.utcnow().isoformat(),
-            "version": "1.0.0",
+            "version": settings.app_version,
             "error": str(e)
         }
+
+
+@app.get("/api/ready")
+async def readiness_check(db: Session = Depends(get_db)):
+    """Readiness probe that verifies the database instead of returning a static status."""
+    try:
+        db.execute(db_text("SELECT 1"))
+        return {
+            "status": "ready",
+            "version": settings.app_version,
+            "database": "connected",
+        }
+    except Exception as exc:
+        logger.exception("Readiness check failed")
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}")
 
 @app.post("/api/force-download-docs/{offer_id}")
 async def force_download_docs(offer_id: str, db: Session = Depends(get_db)):
@@ -1085,7 +1111,10 @@ async def get_xometry_dosar_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/xometry/dosar/{external_offer_id}/create")
+@app.post(
+    "/api/xometry/dosar/{external_offer_id}/create",
+    dependencies=[Depends(require_ingest_auth)],
+)
 async def create_xometry_dosar(
     external_offer_id: str,
     payload: dict = Body(default_factory=dict),
@@ -1248,7 +1277,7 @@ async def update_part_remarks(part_id: int, request: Request, db: Session = Depe
         db.rollback()
         raise HTTPException(status_code=500, detail="Eroare internă")
 
-@app.post("/api/scrape")
+@app.post("/api/scrape", dependencies=[Depends(require_ingest_auth)])
 async def scrape_offer_from_extension(request: Request, db: Session = Depends(get_db)):
     """API endpoint pentru primirea datelor de la extensia Chrome"""
     offer_data = None
@@ -1398,7 +1427,12 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=500, detail="Eroare internă")
 
-@app.post("/api/orders/sync", response_model=Dict[str, str], tags=["Orders"])
+@app.post(
+    "/api/orders/sync",
+    response_model=Dict[str, str],
+    tags=["Orders"],
+    dependencies=[Depends(require_ingest_auth)],
+)
 async def sync_orders(payload: OrderSyncRequest, db: Session = Depends(get_db)):
     """
     Sincronizează lista de comenzi din extensie în baza de date.
@@ -1409,6 +1443,8 @@ async def sync_orders(payload: OrderSyncRequest, db: Session = Depends(get_db)):
         logger.info(f"Received {len(orders)} orders for sync.")
 
         synced_count = 0
+        updated_count = 0
+        received_order_ids = set()
         import re
         def _strip_ext(name: str) -> str:
             if not name:
@@ -1426,6 +1462,7 @@ async def sync_orders(payload: OrderSyncRequest, db: Session = Depends(get_db)):
             
             if not order_id:
                 continue
+            received_order_ids.add(str(order_id))
 
             # Normalize part name (remove file extension)
             if od.get('part_name'):
@@ -1471,6 +1508,7 @@ async def sync_orders(payload: OrderSyncRequest, db: Session = Depends(get_db)):
                     existing.local_image_path = local_img_path
                 existing.updated_at = datetime.utcnow()
                 existing.details = od
+                updated_count += 1
             else:
                 new_order = Order(
                     order_id=order_id,
@@ -1485,7 +1523,13 @@ async def sync_orders(payload: OrderSyncRequest, db: Session = Depends(get_db)):
                 synced_count += 1
         
         db.commit()
-        return {"success": "True", "message": f"Synced {synced_count} orders."}
+        return {
+            "success": "True",
+            "message": (
+                f"Accepted {len(orders)} part rows from {len(received_order_ids)} PO(s); "
+                f"inserted {synced_count}, updated {updated_count}."
+            ),
+        }
 
     except Exception as e:
         logger.error(f"Error syncing orders: {e}")
@@ -1603,7 +1647,7 @@ async def get_dosar_info(offer_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Eroare internă: {str(e)}")
 
 
-@app.post("/api/extension/analyze")
+@app.post("/api/extension/analyze", dependencies=[Depends(require_ingest_auth)])
 async def analyze_part_extension_deprecated(
     payload: dict = Body(...),
     db: Session = Depends(get_db)
@@ -1705,7 +1749,7 @@ async def process_and_notify(part_id: str, data: dict):
     await manager.broadcast_to_part(msg, part_id)
 
 
-@app.post("/api/extension/analyze")
+@app.post("/api/extension/analyze/async", dependencies=[Depends(require_ingest_auth)])
 async def analyze_part_extension(
     background_tasks: BackgroundTasks,
     payload: dict = Body(...),
@@ -1783,18 +1827,20 @@ async def get_orders_api(
                 (Order.details.cast(db_String).ilike(term))
             )
         
-        total = query.count()
+        total_rows = query.count()
+        total_orders = query.with_entities(func.count(func.distinct(Order.order_id))).scalar() or 0
         
         # We need to sort by business date (DD.MM.YYYY string). 
         # In SQLite: substr(date, 7, 4) || substr(date, 4, 2) || substr(date, 1, 2) for YYYYMMDD
-        from sqlalchemy import func
         sortable_date = func.substr(Order.order_date, 7, 4).op('||')(func.substr(Order.order_date, 4, 2)).op('||')(func.substr(Order.order_date, 1, 2))
         
         # Sort by that business date DESC, then by internal ID DESC
         orders = query.order_by(sortable_date.desc(), Order.id.desc()).offset(offset).limit(limit).all()
         
         return {
-            "total": total,
+            "total": total_rows,
+            "total_rows": total_rows,
+            "total_orders": total_orders,
             "offset": offset,
             "limit": limit,
             "orders": [
@@ -1813,21 +1859,6 @@ async def get_orders_api(
     except Exception as e:
         logger.error(f"Error in get_orders_api: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/orders", response_class=HTMLResponse)
-async def list_orders(request: Request):
-    """Afișează dashboard-ul (initial page only)"""
-    return templates.TemplateResponse("orders.html", {"request": request})
-
-@app.get("/documentation", response_class=HTMLResponse)
-async def documentation(request: Request):
-    """Pagina de documentație"""
-    return templates.TemplateResponse("documentation.html", {"request": request})
-
-@app.get("/help", response_class=HTMLResponse)
-async def help_page(request: Request):
-    """Pagina de ajutor"""
-    return templates.TemplateResponse("help.html", {"request": request})
 
 if __name__ == "__main__":
     import uvicorn

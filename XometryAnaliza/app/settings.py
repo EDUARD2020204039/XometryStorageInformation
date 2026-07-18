@@ -19,7 +19,10 @@ SHEET_AGENT_RETRY_SECONDS = int(os.getenv("SHEET_AGENT_RETRY_SECONDS", "3600"))
 STALE_RUNNING_SECONDS = int(os.getenv("STALE_RUNNING_SECONDS", "300"))
 AGENT_BUSY_MAX_RETRIES = int(os.getenv("AGENT_BUSY_MAX_RETRIES", "3"))
 BACKEND_URL = os.getenv("BACKEND_URL", "http://xometry-app:10000").rstrip("/")
-BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", os.getenv("BACKEND_URL", "http://86.123.232.23:10000")).rstrip("/")
+BACKEND_PUBLIC_URL = os.getenv(
+    "BACKEND_PUBLIC_URL",
+    "https://xometrystorageinformation.habaresearch.eu",
+).rstrip("/")
 
 XOMETRY_EMAIL = os.getenv("XOMETRY_EMAIL", "")
 XOMETRY_PASSWORD = os.getenv("XOMETRY_PASSWORD", "")

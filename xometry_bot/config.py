@@ -58,6 +58,7 @@ ORDERS_URL = os.getenv("ORDERS_URL", "https://partner.xometry.eu/orders?locale=e
 ORDERS_PAGINATION_MAX_PAGES = int(os.getenv("ORDERS_PAGINATION_MAX_PAGES", "0"))  # 0 = auto
 ORDERS_STOP_AFTER_EMPTY_PAGES = int(os.getenv("ORDERS_STOP_AFTER_EMPTY_PAGES", "3"))
 ORDERS_PROCESS_ONLY_NEW = os.getenv("ORDERS_PROCESS_ONLY_NEW", "true").lower() in ("1", "true", "yes")
+ORDERS_REFRESH_RECENT_PAGES = int(os.getenv("ORDERS_REFRESH_RECENT_PAGES", "2"))
 ORDERS_SYNC_LOCK_MAX_AGE = int(os.getenv("ORDERS_SYNC_LOCK_MAX_AGE", "21600"))  # 6 hours
 BACKEND_ORDERS_BATCH_SIZE = int(os.getenv("BACKEND_ORDERS_BATCH_SIZE", "200"))
 BACKEND_ORDERS_TIMEOUT = int(os.getenv("BACKEND_ORDERS_TIMEOUT", "180"))

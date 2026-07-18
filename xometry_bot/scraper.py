@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import base64
+from order_sync import select_order_links
 
 import requests
 from playwright.sync_api import Page, Locator
@@ -1310,6 +1311,7 @@ def scrape_orders(
     max_pages=0,
     stop_after_empty_pages=0,
     process_only_new=True,
+    refresh_recent_pages=2,
 ):
     try:
         page.goto(config.ORDERS_URL, wait_until="domcontentloaded", timeout=30000)
@@ -1323,6 +1325,7 @@ def scrape_orders(
 
     seen_ids = set(seen_order_ids or [])
     order_links = []
+    collected_links = set()
     empty_pages = 0
     max_found = _get_orders_max_page(page)
     if max_pages and max_pages > 0:
@@ -1335,15 +1338,21 @@ def scrape_orders(
         if not links:
             empty_pages += 1
         else:
-            new_links = []
+            selected_links, new_links = select_order_links(
+                links,
+                seen_ids,
+                page_number=page_num,
+                process_only_new=process_only_new,
+                refresh_recent_pages=refresh_recent_pages,
+            )
             for href in links:
-                key = href.rstrip("/").split("/")[-1]
-                if key not in seen_ids:
-                    new_links.append(href)
-                seen_ids.add(key)
-            if new_links:
+                seen_ids.add(href.rstrip("/").split("/")[-1])
+            if selected_links:
                 empty_pages = 0
-                order_links.extend(new_links if process_only_new else links)
+                for href in selected_links:
+                    if href not in collected_links:
+                        collected_links.add(href)
+                        order_links.append(href)
             else:
                 empty_pages += 1
         if stop_after_empty_pages and empty_pages >= stop_after_empty_pages:

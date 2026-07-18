@@ -13,6 +13,7 @@ import notifier
 import backend
 import browser_utils
 import agent_client
+from order_sync import should_persist_seen_state
 
 FORCE_SCRAPE_FLAG = os.path.join("data", "force_scrape.flag")
 FORCE_SCRAPE_POLL_INTERVAL = 5
@@ -474,6 +475,7 @@ def run_iteration():
                                 max_pages=config.ORDERS_PAGINATION_MAX_PAGES,
                                 stop_after_empty_pages=config.ORDERS_STOP_AFTER_EMPTY_PAGES,
                                 process_only_new=config.ORDERS_PROCESS_ONLY_NEW,
+                                refresh_recent_pages=config.ORDERS_REFRESH_RECENT_PAGES,
                             )
                             if not orders:
                                 logger.warning("Orders sync: no data found.")
@@ -484,7 +486,13 @@ def run_iteration():
                                     logger.info(f"Orders sync sent: {len(orders)} records.")
                                 else:
                                     logger.error(f"Orders sync failed: {err}")
-                            if 'seen_after' in locals():
+                            if (
+                                'seen_after' in locals()
+                                and should_persist_seen_state(
+                                    records_sent=len(orders),
+                                    backend_accepted=bool(orders and ok),
+                                )
+                            ):
                                 _save_seen_orders(seen_after)
                         finally:
                             _release_orders_lock()

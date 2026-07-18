@@ -227,7 +227,9 @@
                     }
                 }
 
-                countEl.textContent = `Afișate ${currentOffset} din ${totalRecords}`;
+                const totalOrders = data.total_orders ?? totalRecords;
+                const totalRows = data.total_rows ?? totalRecords;
+                countEl.textContent = `Afișate ${currentOffset} repere din ${totalRows} · ${totalOrders} PO-uri`;
             } catch (e) {
                 console.error("Fetch error:", e);
                 countEl.textContent = "Eroare la încărcare";

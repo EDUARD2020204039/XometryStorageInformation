@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Setări Xometry Extension</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 32px; max-width: 680px; color: #172033; }
+    label { display: block; margin: 18px 0 6px; font-weight: 600; }
+    input[type="password"] { box-sizing: border-box; width: 100%; padding: 9px; }
+    .toggle { display: flex; gap: 9px; align-items: center; font-weight: 600; }
+    button { margin-top: 20px; padding: 9px 18px; cursor: pointer; }
+    #status { margin-left: 12px; color: #087f5b; }
+    .hint { color: #667085; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Xometry Extension</h1>
+  <label class="toggle"><input id="extensionEnabled" type="checkbox"> Activă pe Xometry</label>
+  <p class="hint">Este activată implicit. După schimbare, reîncarcă pagina Xometry.</p>
+
+  <label for="xsiApiToken">Token API XSI</label>
+  <input id="xsiApiToken" type="password" autocomplete="off" placeholder="Se configurează când activăm autentificarea backend">
+  <p class="hint">Tokenul rămâne în spațiul local al extensiei și este trimis numai către backendul configurat.</p>
+
+  <button id="save" type="button">Salvează</button><span id="status" role="status"></span>
+  <script src="options.js"></script>
+</body>
+</html>

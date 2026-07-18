@@ -8,7 +8,7 @@ from typing import Any
 import requests
 
 from . import queue_store, settings
-from .store import append_event, list_jobs, read_events
+from .store import append_event, list_jobs, load_job_state, read_events
 from .telegram_log import send_log
 
 
@@ -258,23 +258,60 @@ def _check_recent_flow_errors() -> dict[str, Any]:
         if any(marker in lowered for marker in ignored_markers):
             continue
         if any(marker in lowered for marker in markers):
-            hits.append({
+            context = {
                 "ts": item.get("ts"),
                 "type": event_type,
                 "message": message[:260],
                 "job_id": item.get("job_id"),
                 "offer_id": item.get("offer_id"),
-            })
+                "status": item.get("status"),
+                "error": item.get("error"),
+                "failure_type": item.get("failure_type"),
+                "failure_action": item.get("failure_action") or item.get("action"),
+                "diagnostic_category": item.get("diagnostic_category"),
+                "diagnostic_summary": item.get("diagnostic_summary"),
+                "geo_ready_count": item.get("geo_ready_count"),
+                "geo_requested_count": item.get("geo_requested_count"),
+            }
+            job_id = str(item.get("job_id") or "").strip()
+            if job_id and not context.get("error"):
+                state = load_job_state(job_id) or {}
+                sheet = state.get("sheet_metal_laser") or {}
+                diagnostic = sheet.get("diagnostic") or {}
+                context.update({
+                    "status": context.get("status") or sheet.get("status"),
+                    "error": sheet.get("error"),
+                    "failure_type": context.get("failure_type") or sheet.get("failure_type"),
+                    "failure_action": context.get("failure_action") or sheet.get("failure_action"),
+                    "diagnostic_category": context.get("diagnostic_category") or diagnostic.get("category"),
+                    "diagnostic_summary": context.get("diagnostic_summary") or diagnostic.get("summary"),
+                    "geo_ready_count": context.get("geo_ready_count") if context.get("geo_ready_count") is not None else sheet.get("geo_ready_count"),
+                    "geo_requested_count": context.get("geo_requested_count") if context.get("geo_requested_count") is not None else sheet.get("geo_requested_count"),
+                })
+            hits.append({key: value for key, value in context.items() if value not in (None, "")})
+    incidents: dict[str, dict[str, Any]] = {}
+    for hit in hits:
+        job_id = str(hit.get("job_id") or "").strip()
+        offer_id = str(hit.get("offer_id") or "").strip()
+        incident_key = f"job:{job_id}" if job_id else f"offer:{offer_id}" if offer_id else f"event:{hit.get('type')}:{hit.get('message')}"
+        previous = incidents.get(incident_key, {})
+        incidents[incident_key] = {
+            **previous,
+            **{key: value for key, value in hit.items() if value not in (None, "")},
+            "related_event_count": int(previous.get("related_event_count") or 0) + 1,
+        }
+    incident_items = sorted(incidents.values(), key=lambda item: float(item.get("ts") or 0))
     details = {
         "window_seconds": settings.WATCHDOG_RECENT_ERROR_SECONDS,
-        "hit_count": len(hits),
-        "examples": hits[-8:],
+        "raw_event_count": len(hits),
+        "hit_count": len(incident_items),
+        "examples": incident_items[-8:],
     }
-    if hits:
+    if incident_items:
         return _scenario(
             "recent_flow_errors",
             False,
-            f"Am gasit {len(hits)} evenimente recente cu login/eroare/timeout.",
+            f"Am gasit {len(incident_items)} incidente recente cu login/eroare/timeout ({len(hits)} evenimente corelate).",
             details,
             severity="warning",
         )

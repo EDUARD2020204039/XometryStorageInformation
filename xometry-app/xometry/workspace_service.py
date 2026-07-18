@@ -113,7 +113,7 @@ def download_document_links(offer_id: str, links: list[dict[str, Any]] | None) -
 
 
 def _copy_agent_geo(offer_id: str, paths: dict[str, Path], copied: list[str], warnings: list[str]) -> None:
-    agent_url = (os.getenv("XOMETRY_AGENT_URL") or os.getenv("AGENT_URL") or "http://192.168.2.23:4468").rstrip("/")
+    agent_url = (os.getenv("XOMETRY_AGENT_URL") or os.getenv("AGENT_URL") or "http://xometryanaliza:4468").rstrip("/")
     try:
         response = requests.get(f"{agent_url}/api/agents/geo/{quote(str(offer_id), safe='')}", timeout=10)
         if response.status_code == 404:
@@ -144,7 +144,7 @@ def _copy_agent_geo(offer_id: str, paths: dict[str, Path], copied: list[str], wa
 
 
 def _copy_bend_artifacts(offer_id: str, paths: dict[str, Path], copied: list[str], warnings: list[str]) -> None:
-    agent_url = (os.getenv("XOMETRY_AGENT_URL") or os.getenv("AGENT_URL") or "http://192.168.2.23:4468").rstrip("/")
+    agent_url = (os.getenv("XOMETRY_AGENT_URL") or os.getenv("AGENT_URL") or "http://xometryanaliza:4468").rstrip("/")
     try:
         response = requests.get(f"{agent_url}/api/agents/bend/{quote(str(offer_id), safe='')}", timeout=10)
         if response.status_code == 404:
