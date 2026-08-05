@@ -6,8 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import requests
-
 from .odoo_client import OdooClient
 
 
@@ -16,7 +14,6 @@ logger = logging.getLogger(__name__)
 _PREVIEW_CACHE_LOCK = threading.Lock()
 _PREVIEW_CACHE_VALUE: dict[str, Any] | None = None
 _PREVIEW_CACHE_EXPIRES = 0.0
-_LEGACY_API_BLOCKED_UNTIL = 0.0
 _ALLOCATION_LOCK = threading.Lock()
 
 
@@ -31,34 +28,12 @@ class DosarService:
     """Service for allocating Xometry dossier numbers and creating their folder/Odoo record."""
 
     def __init__(self, api_url: str | None = None, api_token: str | None = None):
-        self.api_url = (api_url or os.getenv("DOSAR_API_URL", "")).rstrip("/")
-        self.api_token = api_token if api_token is not None else os.getenv("DOSAR_API_TOKEN", "")
-        self.headers = {"Authorization": f"Bearer {self.api_token}"} if self.api_token else {}
         self.folder_enabled = os.getenv("DOSAR_FOLDER_ENABLED", "true").lower() in ("1", "true", "yes")
         self.folder_required = os.getenv("DOSAR_FOLDER_REQUIRED", "false").lower() in ("1", "true", "yes")
         self.odoo_required = os.getenv("ODOO_DOSAR_REQUIRED", "false").lower() in ("1", "true", "yes")
 
     def get_latest_dosar_id(self) -> int | None:
-        global _LEGACY_API_BLOCKED_UNTIL
         candidates: list[int] = []
-        now = time.monotonic()
-        if self.api_url and now >= _LEGACY_API_BLOCKED_UNTIL:
-            try:
-                response = requests.get(
-                    f"{self.api_url}/getLatestDosar/",
-                    headers=self.headers,
-                    timeout=3,
-                )
-                response.raise_for_status()
-                data = response.json()
-                dosar_id = int(data.get("DosarID", 0))
-                logger.info("Latest legacy API dosar ID: %s", dosar_id)
-                candidates.append(dosar_id)
-            except Exception as e:
-                cooldown = max(30, int(os.getenv("DOSAR_API_FAILURE_COOLDOWN_SECONDS", "300")))
-                _LEGACY_API_BLOCKED_UNTIL = now + cooldown
-                logger.warning("Legacy dosar API unavailable; pausing it for %ss: %s", cooldown, e)
-
         try:
             client = OdooClient()
             if client.configured:
@@ -139,35 +114,14 @@ class DosarService:
                 "response": {"result": "SKIPPED", "message": "DOSAR_FOLDER_ENABLED=false"},
             }
 
-        try:
-            response = requests.get(
-                f"{self.api_url}/999/createFolder/{folder_name}",
-                headers=self.headers,
-                timeout=8,
-            )
-            response.raise_for_status()
-            result = response.json()
-            logger.info("Create folder response for %s: %s", folder_name, result)
-
-            if result.get("result") != "OK":
-                raise RuntimeError(f"Folder API error: {result.get('message')}")
-
-            return {
-                "success": True,
-                "dosar_id": dosar_id,
-                "folder_name": folder_name,
-                "path_linux": f"/mnt/xLucru/{folder_name}",
-                "path_windows": f"X:\\{folder_name}",
-                "response": result,
-            }
-        except Exception as e:
-            logger.error("Could not create dosar folder %s: %s", folder_name, e)
-            return {
-                "success": False,
-                "error": str(e),
-                "dosar_id": dosar_id,
-                "folder_name": folder_name,
-            }
+        error = f"DOSAR_ROOT_PATH is unavailable: {root_path}"
+        logger.error("Could not create dosar folder %s: %s", folder_name, error)
+        return {
+            "success": False,
+            "error": error,
+            "dosar_id": dosar_id,
+            "folder_name": folder_name,
+        }
 
     def create_odoo_dosar(self, folder_name: str, metadata: dict[str, Any]) -> dict[str, Any]:
         client = OdooClient()
