@@ -2,18 +2,35 @@
 console.log("[BG] Service Worker Loaded");
 // Handles HTTP requests to Stock API and Local Logger
 
-const API_BASE = "";
+const API_BASE = "https://stocmanagement.habaresearch.eu/api";
 const API_KEY = "";
 const LOG_SERVER = "";
-const BACKEND_URLS = [];
+const BACKEND_URLS = ["https://xometrystorageinformation.habaresearch.eu"];
 const BACKEND_URL = BACKEND_URLS[0];
 const AGENT_URLS = [
-    "http://192.168.2.23:4468",
-    "http://86.123.232.23:4468",
-    "http://127.0.0.1:4468"
+    "https://qa.habaresearch.eu"
 ];
 
+function hasDataConsent() {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(["dataConsent"], (result) => {
+            resolve(!chrome.runtime.lastError && result.dataConsent === true);
+        });
+    });
+}
+
+async function requireDataConsent() {
+    if (!(await hasDataConsent())) {
+        throw new Error("Transferul catre serviciile HABA este oprit. Deschide optiunile extensiei si confirma acordul.");
+    }
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+    if (!(await hasDataConsent())) chrome.runtime.openOptionsPage();
+});
+
 async function fetchBackend(path, options = {}) {
+    await requireDataConsent();
     const { timeout = 10000, ...fetchOptions } = options;
     let lastError = "Backend unavailable";
 
@@ -44,12 +61,12 @@ async function fetchBackend(path, options = {}) {
 const AnalysisManager = {
     sockets: {},
 
-    connect: function (partId, tabId) {
+    connect: async function (partId, tabId) {
         if (this.sockets[partId]) {
             this.sockets[partId].tabId = tabId;
         }
 
-        const wsUrl = `ws://86.123.232.23:10000/ws/${partId}`;
+        const wsUrl = `wss://xometrystorageinformation.habaresearch.eu/ws/${partId}`;
         logToLocalServer(`[BG-WS] Connecting to ${wsUrl}`);
 
         // Helper to send debug to content script
@@ -59,6 +76,11 @@ const AnalysisManager = {
                     .catch(() => { });
             }
         };
+
+        if (!(await hasDataConsent())) {
+            broadcastDebug("[BG] Transfer disabled. Enable it from extension options.");
+            return;
+        }
 
         if (this.sockets[partId]) {
             broadcastDebug(`[BG] Re-using existing connection for ${partId}`);
@@ -230,6 +252,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function logToLocalServer(message) {
     // Always log to background console for user debugging
     console.log("[BG] " + message);
+    if (!LOG_SERVER) return;
     try {
         await fetch(LOG_SERVER, {
             method: 'POST',
@@ -285,6 +308,7 @@ async function checkJobHistory(jobIdString, excludeOfferId) {
 }
 
 async function checkStock(material, thickness) {
+    await requireDataConsent();
     // Log intent
     logToLocalServer(`Checking Stock: ${material} ${thickness}mm`);
 
@@ -325,6 +349,7 @@ async function checkStock(material, thickness) {
 // Backend Integration Implementations
 
 async function getAgentGeo(offerId) {
+    await requireDataConsent();
     let lastError = "Analysis service unavailable";
     for (const baseUrl of AGENT_URLS) {
         const url = `${baseUrl}/api/agents/geo/${encodeURIComponent(offerId)}`;

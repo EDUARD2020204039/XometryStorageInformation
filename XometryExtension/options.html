@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configurare Xometry Price Calculator</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header>
+    <img src="icon.png" alt="" width="52" height="52">
+    <div>
+      <h1>Xometry Price Calculator</h1>
+      <p>Configurare transfer date</p>
+    </div>
+  </header>
+
+  <main>
+    <h2>Cum sunt folosite datele</h2>
+    <p>
+      Extensia citeste informatiile tehnice si comerciale vizibile in ofertele Xometry pentru a calcula preturi,
+      verifica stocul, genera analize GEO si crea dosare interne.
+    </p>
+    <p>
+      Cand transferul este activ, identificatorii ofertelor si reperelor, denumirile, dimensiunile, materialele,
+      procesele, cantitatile, preturile si documentatia solicitata sunt trimise criptat serviciilor interne HABA.
+      Datele nu sunt vandute si nu sunt folosite pentru publicitate.
+    </p>
+
+    <label class="consent-row">
+      <input id="data-consent" type="checkbox">
+      <span>Sunt de acord cu transmiterea datelor ofertelor catre serviciile interne HABA pentru functiile descrise.</span>
+    </label>
+
+    <div class="actions">
+      <button id="save" type="button">Salveaza</button>
+      <a href="https://xometrystorageinformation.habaresearch.eu/static/extension-privacy.html" target="_blank" rel="noreferrer">
+        Politica de confidentialitate
+      </a>
+    </div>
+    <p id="status" role="status"></p>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

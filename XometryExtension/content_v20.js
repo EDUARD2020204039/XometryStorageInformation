@@ -379,7 +379,7 @@
                 if (chrome.runtime.lastError) return;
 
                 let label = "Err", color = "red", bg = "#fff1f0", border = "#ffa39e", tooltip = "Error";
-                let debugUrl = `http://86.123.232.23:2222/show_all?material=${material}&grosime=${thickness}`;
+                let debugUrl = `https://stocmanagement.habaresearch.eu/show_all?material=${material}&grosime=${thickness}`;
 
                 if (res && res.success && res.data) {
                     const count = res.data.count || (res.data.items ? res.data.items.length : 0);
@@ -645,7 +645,7 @@
     function backendOfferUrl(source, backendUrl) {
         if (!backendUrl) return '#';
         if (/^https?:\/\//i.test(backendUrl)) return backendUrl;
-        return `${String(source || 'http://192.168.2.23:10000').replace(/\/$/, '')}${backendUrl}`;
+        return `${String(source || 'https://xometrystorageinformation.habaresearch.eu').replace(/\/$/, '')}${backendUrl}`;
     }
 
     function injectDosarTitleControls(status, source) {
@@ -735,7 +735,7 @@
         const data = buildOffer();
         if (!data || !data.offer_id || data.offer_id === "unknown") return;
         if (!document.getElementById('xom-dosar-create-btn')) {
-            injectDosarTitleControls({ has_dosar: false, current: null, references_with_dosar: [] }, 'http://192.168.2.23:10000');
+            injectDosarTitleControls({ has_dosar: false, current: null, references_with_dosar: [] }, 'https://xometrystorageinformation.habaresearch.eu');
         }
     }
 
@@ -1135,7 +1135,7 @@
                 const linkId = internalId || offerId;
                 const link = document.createElement('a');
                 link.id = 'xom-backend-link';
-                link.href = `http://86.123.232.23:10000/offer/${linkId}`;
+                link.href = `https://xometrystorageinformation.habaresearch.eu/offer/${linkId}`;
                 link.target = '_blank';
                 link.innerHTML = `🔗 Open Backend (#${linkId})`;
                 Object.assign(link.style, {
@@ -1654,7 +1654,7 @@
         // Tooltip for details
         let tooltipList = items.map(i => {
             const label = i.title || i.job_name || "Job " + i.offer_id;
-            const url = BackendUI ? 'http://86.123.232.23:10000/offer/' + (i.id || i.offer_id) : '#';
+            const url = BackendUI ? 'https://xometrystorageinformation.habaresearch.eu/offer/' + (i.id || i.offer_id) : '#';
             return `<div><a href="${url}" target="_blank" style="display:block; padding:2px 0;">${label}</a></div>`;
         }).join('');
 
