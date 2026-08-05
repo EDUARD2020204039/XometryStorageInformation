@@ -712,14 +712,37 @@
         }).format(date);
     }
 
-    function injectScraperTiming(metadata) {
+    function scraperTimingElement() {
         const title = findJobTitleElement();
-        if (!title) return;
+        if (!title) return null;
         let timing = document.getElementById('xom-scraper-timing');
         if (!timing) {
             timing = document.createElement('span');
             timing.id = 'xom-scraper-timing';
             titleActionContainer(title).appendChild(timing);
+        }
+        return timing;
+    }
+
+    function setScraperTimingState(state, metadata = {}) {
+        const timing = scraperTimingElement();
+        if (!timing) return;
+        timing.dataset.state = state;
+
+        if (state === 'checking') {
+            timing.textContent = 'Scraper: se verifica...';
+            timing.title = 'Se interogheaza baza de date a scraperului.';
+            return;
+        }
+        if (state === 'not-seen') {
+            timing.textContent = 'Scraper: nu a vazut inca acest job';
+            timing.title = 'Jobul sau RFQ-ul nu exista inca in istoricul scraperului.';
+            return;
+        }
+        if (state === 'unavailable') {
+            timing.textContent = 'Scraper: verificare indisponibila';
+            timing.title = metadata.error || 'Backendul scraperului nu a raspuns.';
+            return;
         }
 
         const firstSeen = formatScraperTimestamp(metadata.firstSeenAt);
@@ -733,6 +756,10 @@
             `Stare analiza: ${metadata.analysisStatus || 'neprecizata'}`,
             `Scanari: ${metadata.seenCount || 1}`
         ].join('\n');
+    }
+
+    function injectScraperTiming(metadata) {
+        setScraperTimingState('seen', metadata);
     }
 
     function injectAllGeoTitleButton(geoStatus, agentSource, offerId) {
@@ -1217,10 +1244,14 @@
                 if (!chrome.runtime?.id) return;
                 const offerId = buildOffer().offer_id;
                 if (!offerId || offerId === "unknown") return;
+                setScraperTimingState('checking');
 
                 // 1. Check Local
                 chrome.storage.local.get(['scraped_' + offerId], (res) => {
-                    if (chrome.runtime.lastError) return;
+                    if (chrome.runtime.lastError) {
+                        setScraperTimingState('unavailable', { error: chrome.runtime.lastError.message });
+                        return;
+                    }
 
                     const cachedVal = res['scraped_' + offerId];
                     if (cachedVal) {
@@ -1231,7 +1262,10 @@
 
                     // 2. Check Server
                     chrome.runtime.sendMessage({ action: "CHECK_OFFER", offerId: offerId }, (resp) => {
-                        if (chrome.runtime.lastError) return;
+                        if (chrome.runtime.lastError) {
+                            setScraperTimingState('unavailable', { error: chrome.runtime.lastError.message });
+                            return;
+                        }
 
                         if (resp && resp.exists) {
                             const intId = resp.internalId;
@@ -1240,6 +1274,10 @@
                             chrome.storage.local.set(save);
                             this.addBackendLink(offerId, intId);
                             injectScraperTiming(resp);
+                        } else if (resp && resp.error) {
+                            setScraperTimingState('unavailable', resp);
+                        } else {
+                            setScraperTimingState('not-seen');
                         }
                     });
                 });

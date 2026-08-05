@@ -173,6 +173,24 @@
   white-space: nowrap;
 }
 
+#xom-scraper-timing[data-state="checking"] {
+  border-color: #e5b84b;
+  background: #fff8e1;
+  color: #76520b;
+}
+
+#xom-scraper-timing[data-state="not-seen"] {
+  border-color: #c7ced8;
+  background: #f6f7f9;
+  color: #566273;
+}
+
+#xom-scraper-timing[data-state="unavailable"] {
+  border-color: #e1a3a8;
+  background: #fff1f2;
+  color: #9f2530;
+}
+
 .xom-geo-row {
   margin-top: 6px;
   margin-bottom: 6px;

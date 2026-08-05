@@ -484,7 +484,7 @@ async function checkOfferExists(offerId) {
 
         if (!resp.ok) {
             logToLocalServer(`List fetch error: ${resp.status}`);
-            return { exists: false };
+            return { exists: false, error: `Backend HTTP ${resp.status}` };
         }
 
         const offers = await resp.json();
@@ -510,7 +510,7 @@ async function checkOfferExists(offerId) {
         }
     } catch (e) {
         logToLocalServer(`Check error: ${e.message}`);
-        return { exists: false };
+        return { exists: false, error: e.message };
     }
 }
 
