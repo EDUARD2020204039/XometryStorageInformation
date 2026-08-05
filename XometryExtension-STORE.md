@@ -15,11 +15,16 @@ published versions are delivered automatically by Chrome.
 
 Suggested description:
 
-> Extensie interna pentru portalul Xometry Partner. Calculeaza preturi, verifica
-> stocuri si istoric, porneste analiza tehnica si generarea fisierelor GEO si
-> permite crearea dosarelor interne de productie. Transferul catre serviciile
-> HABA este dezactivat pana cand utilizatorul isi exprima acordul in pagina de
-> configurare.
+> Xometry Price Calculator este o extensie interna pentru echipa HABA care
+> adauga instrumente de ofertare direct in portalul Xometry Partner. Extensia
+> preia informatiile tehnice vizibile ale ofertei, permite calcularea si
+> pastrarea valorilor de ofertare, verifica stocurile si istoricul reperelor,
+> porneste analiza tehnica si generarea fisierelor GEO si ajuta la crearea
+> dosarelor interne de productie. Fisierele GEO pot fi vizualizate sau
+> descarcate la cererea utilizatorului. Comunicarea cu serviciile interne HABA
+> foloseste conexiuni securizate HTTPS/WSS si este dezactivata pana cand
+> utilizatorul isi exprima acordul in pagina de configurare. Extensia nu
+> afiseaza reclame si nu vinde datele prelucrate.
 
 ## Permission justifications
 
@@ -31,6 +36,17 @@ Suggested description:
   calcul si analiza.
 - Domeniile `habaresearch.eu`: comunica prin HTTPS/WSS cu serviciile interne de
   stoc, istoric, analiza GEO si dosare de productie.
+
+## Remote code
+
+Select **No, I am not using remote code**.
+
+Justification, if the form requests text:
+
+> Extensia nu executa JavaScript, WebAssembly sau alt cod descarcat de la
+> distanta. Toate fisierele executabile sunt incluse in pachetul extensiei.
+> Serviciile HABA returneaza numai date JSON, fisiere si stari operationale,
+> care sunt procesate de codul local inclus in extensie.
 
 ## Privacy declarations
 
