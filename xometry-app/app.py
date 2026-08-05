@@ -9,6 +9,7 @@ from logging.handlers import RotatingFileHandler
 from uuid import uuid4
 from typing import Dict, List, Optional
 import logging
+import time
 from datetime import datetime, timezone
 from pydantic import BaseModel
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Form, HTTPException, Depends, Body
@@ -1080,7 +1081,7 @@ async def get_offer_parts(offer_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Eroare internă")
 
 @app.get("/api/xometry/dosar/{external_offer_id}")
-async def get_xometry_dosar_status(
+def get_xometry_dosar_status(
     external_offer_id: str,
     job_id: Optional[str] = None,
     part_ids: Optional[str] = None,
@@ -1126,7 +1127,7 @@ async def get_xometry_dosar_status(
 
 
 @app.post("/api/xometry/dosar/{external_offer_id}/create")
-async def create_xometry_dosar(
+def create_xometry_dosar(
     external_offer_id: str,
     payload: dict = Body(default_factory=dict),
     db: Session = Depends(get_db),
@@ -1187,6 +1188,8 @@ async def create_xometry_dosar(
                 _normalize_offer_title(offer.title, offer.offer_id, offer.url),
             ),
         }
+        create_started = time.monotonic()
+        logger.info("Dosar create %s: request started", offer.offer_id)
         result = DosarService().allocate_dosar(offer.offer_id, offer.title, metadata=metadata)
         if not result.get("success"):
             raise HTTPException(status_code=502, detail=result.get("error") or "Nu s-a putut crea dosarul")
@@ -1194,9 +1197,23 @@ async def create_xometry_dosar(
         workspace = None
         try:
             from xometry.workspace_service import create_xometry_workspace, download_document_links
+            workspace_started = time.monotonic()
             document_download = download_document_links(offer.offer_id, payload.get("documentation_links") or [])
+            logger.info(
+                "Dosar create %s: documentation stage finished in %.2fs (%s files, %s warnings)",
+                offer.offer_id,
+                time.monotonic() - workspace_started,
+                len(document_download.get("downloaded") or []),
+                len(document_download.get("warnings") or []),
+            )
             result["document_download"] = document_download
+            workspace_started = time.monotonic()
             workspace = create_xometry_workspace(result["folder_name"], offer.offer_id, metadata)
+            logger.info(
+                "Dosar create %s: workspace stage finished in %.2fs",
+                offer.offer_id,
+                time.monotonic() - workspace_started,
+            )
             result["workspace"] = workspace
         except Exception as workspace_error:
             logger.error("Could not populate Xometry workspace: %s", workspace_error)
@@ -1210,6 +1227,7 @@ async def create_xometry_dosar(
         offer.dosar_allocated = datetime.utcnow()
         db.commit()
         db.refresh(offer)
+        logger.info("Dosar create %s: request completed in %.2fs", offer.offer_id, time.monotonic() - create_started)
 
         return {
             "success": True,

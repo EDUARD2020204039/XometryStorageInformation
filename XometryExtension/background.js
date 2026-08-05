@@ -403,7 +403,7 @@ async function createDosar(offerData) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(offerData),
-            timeout: 30000
+            timeout: 120000
         });
         const data = await resp.json();
         if (!resp.ok) return { success: false, error: data.detail || `HTTP ${resp.status}`, data };

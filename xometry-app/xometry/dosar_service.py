@@ -1,5 +1,7 @@
 import logging
 import os
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,19 @@ from .odoo_client import OdooClient
 
 
 logger = logging.getLogger(__name__)
+
+_PREVIEW_CACHE_LOCK = threading.Lock()
+_PREVIEW_CACHE_VALUE: dict[str, Any] | None = None
+_PREVIEW_CACHE_EXPIRES = 0.0
+_LEGACY_API_BLOCKED_UNTIL = 0.0
+_ALLOCATION_LOCK = threading.Lock()
+
+
+def invalidate_dosar_preview_cache() -> None:
+    global _PREVIEW_CACHE_VALUE, _PREVIEW_CACHE_EXPIRES
+    with _PREVIEW_CACHE_LOCK:
+        _PREVIEW_CACHE_VALUE = None
+        _PREVIEW_CACHE_EXPIRES = 0.0
 
 
 class DosarService:
@@ -24,20 +39,25 @@ class DosarService:
         self.odoo_required = os.getenv("ODOO_DOSAR_REQUIRED", "false").lower() in ("1", "true", "yes")
 
     def get_latest_dosar_id(self) -> int | None:
+        global _LEGACY_API_BLOCKED_UNTIL
         candidates: list[int] = []
-        try:
-            response = requests.get(
-                f"{self.api_url}/getLatestDosar/",
-                headers=self.headers,
-                timeout=8,
-            )
-            response.raise_for_status()
-            data = response.json()
-            dosar_id = int(data.get("DosarID", 0))
-            logger.info("Latest dosar ID: %s", dosar_id)
-            candidates.append(dosar_id)
-        except Exception as e:
-            logger.error("Could not read latest dosar ID: %s", e)
+        now = time.monotonic()
+        if self.api_url and now >= _LEGACY_API_BLOCKED_UNTIL:
+            try:
+                response = requests.get(
+                    f"{self.api_url}/getLatestDosar/",
+                    headers=self.headers,
+                    timeout=3,
+                )
+                response.raise_for_status()
+                data = response.json()
+                dosar_id = int(data.get("DosarID", 0))
+                logger.info("Latest legacy API dosar ID: %s", dosar_id)
+                candidates.append(dosar_id)
+            except Exception as e:
+                cooldown = max(30, int(os.getenv("DOSAR_API_FAILURE_COOLDOWN_SECONDS", "300")))
+                _LEGACY_API_BLOCKED_UNTIL = now + cooldown
+                logger.warning("Legacy dosar API unavailable; pausing it for %ss: %s", cooldown, e)
 
         try:
             client = OdooClient()
@@ -71,19 +91,29 @@ class DosarService:
         return latest
 
     def preview_next_dosar(self) -> dict[str, Any]:
-        latest_id = self.get_latest_dosar_id()
-        if latest_id is None:
-            return {"success": False, "error": "Could not read latest dosar ID"}
+        global _PREVIEW_CACHE_VALUE, _PREVIEW_CACHE_EXPIRES
+        ttl = max(5, int(os.getenv("DOSAR_PREVIEW_CACHE_SECONDS", "30")))
+        with _PREVIEW_CACHE_LOCK:
+            now = time.monotonic()
+            if _PREVIEW_CACHE_VALUE is not None and now < _PREVIEW_CACHE_EXPIRES:
+                return dict(_PREVIEW_CACHE_VALUE)
 
-        next_id = latest_id + 1
-        folder_name = f"{next_id}_XOMETRY"
-        return {
-            "success": True,
-            "dosar_id": str(next_id),
-            "folder_name": folder_name,
-            "path_linux": f"/mnt/xLucru/{folder_name}",
-            "path_windows": f"X:\\{folder_name}",
-        }
+            latest_id = self.get_latest_dosar_id()
+            if latest_id is None:
+                result = {"success": False, "error": "Could not read latest dosar ID"}
+            else:
+                next_id = latest_id + 1
+                folder_name = f"{next_id}_XOMETRY"
+                result = {
+                    "success": True,
+                    "dosar_id": str(next_id),
+                    "folder_name": folder_name,
+                    "path_linux": f"/mnt/xLucru/{folder_name}",
+                    "path_windows": f"X:\\{folder_name}",
+                }
+            _PREVIEW_CACHE_VALUE = dict(result)
+            _PREVIEW_CACHE_EXPIRES = now + ttl
+            return result
 
     def create_dosar_folder(self, dosar_id: int, folder_name: str) -> dict[str, Any]:
         root_path = Path(os.getenv("DOSAR_ROOT_PATH", "/mnt/xLucru"))
@@ -161,10 +191,22 @@ class DosarService:
         offer_title: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        with _ALLOCATION_LOCK:
+            return self._allocate_dosar_locked(offer_id, offer_title, metadata)
+
+    def _allocate_dosar_locked(
+        self,
+        offer_id: str,
+        offer_title: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        started = time.monotonic()
         try:
+            step_started = time.monotonic()
             latest_id = self.get_latest_dosar_id()
             if latest_id is None:
                 return {"success": False, "error": "Could not read latest dosar ID"}
+            logger.info("Dosar allocation %s: latest number resolved in %.2fs", offer_id, time.monotonic() - step_started)
 
             new_dosar_id = latest_id + 1
             folder_name = f"{new_dosar_id}_XOMETRY"
@@ -178,7 +220,9 @@ class DosarService:
 
             logger.info("Allocating dosar for %s: %s", offer_id, folder_name)
 
+            step_started = time.monotonic()
             odoo_result = self.create_odoo_dosar(folder_name, metadata)
+            logger.info("Dosar allocation %s: Odoo stage finished in %.2fs", offer_id, time.monotonic() - step_started)
             if self.odoo_required and not odoo_result.get("success"):
                 return {
                     "success": False,
@@ -186,7 +230,9 @@ class DosarService:
                     "odoo": odoo_result,
                 }
 
+            step_started = time.monotonic()
             folder_result = self.create_dosar_folder(new_dosar_id, folder_name)
+            logger.info("Dosar allocation %s: folder stage finished in %.2fs", offer_id, time.monotonic() - step_started)
             if not folder_result.get("success"):
                 if odoo_result.get("success") and not self.folder_required:
                     return {
@@ -202,7 +248,8 @@ class DosarService:
                     }
                 return {**folder_result, "odoo": odoo_result}
 
-            return {
+            invalidate_dosar_preview_cache()
+            result = {
                 "success": True,
                 "dosar_id": str(new_dosar_id),
                 "folder_name": folder_name,
@@ -211,6 +258,8 @@ class DosarService:
                 "allocated_at": datetime.utcnow().isoformat(),
                 "odoo": odoo_result,
             }
+            logger.info("Dosar allocation %s completed in %.2fs", offer_id, time.monotonic() - started)
+            return result
         except Exception as e:
             logger.error("Could not allocate dosar for %s: %s", offer_id, e)
             return {"success": False, "error": str(e)}

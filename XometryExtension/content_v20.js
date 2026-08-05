@@ -1610,7 +1610,7 @@
     setInterval(() => BackendUI.ensureButton(), 2000);
     setInterval(() => BackendUI.checkScrapedStatus(), 30000);
     setInterval(() => refreshAgentGeo(), 5000);
-    setInterval(() => refreshDosarStatus(), 7000);
+    setInterval(() => refreshDosarStatus(), 30000);
     setInterval(() => ensureDosarTitleControls(), 3000);
 
     // --- Download Features ---
