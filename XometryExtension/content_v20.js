@@ -691,6 +691,50 @@
         return container;
     }
 
+    function parseUtcTimestamp(value) {
+        if (!value) return null;
+        const text = String(value).trim();
+        const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : `${text}Z`;
+        const date = new Date(normalized);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function formatScraperTimestamp(value) {
+        const date = parseUtcTimestamp(value);
+        if (!date) return 'necunoscut';
+        return new Intl.DateTimeFormat('ro-RO', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        }).format(date);
+    }
+
+    function injectScraperTiming(metadata) {
+        const title = findJobTitleElement();
+        if (!title) return;
+        let timing = document.getElementById('xom-scraper-timing');
+        if (!timing) {
+            timing = document.createElement('span');
+            timing.id = 'xom-scraper-timing';
+            titleActionContainer(title).appendChild(timing);
+        }
+
+        const firstSeen = formatScraperTimestamp(metadata.firstSeenAt);
+        const lastSeen = formatScraperTimestamp(metadata.lastSeenAt || metadata.firstSeenAt);
+        const analyzed = metadata.analyzedAt ? formatScraperTimestamp(metadata.analyzedAt) : 'in asteptare';
+        timing.textContent = `Scraper: vazut ${firstSeen} · analizat ${analyzed}`;
+        timing.title = [
+            `Prima detectare: ${firstSeen}`,
+            `Ultima verificare: ${lastSeen}`,
+            `Ultima analiza: ${analyzed}`,
+            `Stare analiza: ${metadata.analysisStatus || 'neprecizata'}`,
+            `Scanari: ${metadata.seenCount || 1}`
+        ].join('\n');
+    }
+
     function injectAllGeoTitleButton(geoStatus, agentSource, offerId) {
         const readyCount = readyGeoEntries(geoStatus?.geo_items || []).length;
         let button = document.getElementById('xom-all-geo-title-btn');
@@ -1134,7 +1178,7 @@
     // UI for Backend
     const BackendUI = {
         ensureButton: function () {
-            const isOfferPage = /\/offers\/\d+/.test(location.href);
+            const isOfferPage = /\/(?:offers|rfqs)\/[^/?#]+/.test(location.href);
             const container = document.getElementById('xom-backend-container');
 
             if (!isOfferPage) {
@@ -1182,7 +1226,6 @@
                     if (cachedVal) {
                         if (typeof cachedVal !== 'boolean') {
                             this.addBackendLink(offerId, cachedVal);
-                            return;
                         }
                     }
 
@@ -1196,6 +1239,7 @@
                             save['scraped_' + offerId] = intId;
                             chrome.storage.local.set(save);
                             this.addBackendLink(offerId, intId);
+                            injectScraperTiming(resp);
                         }
                     });
                 });
@@ -1394,7 +1438,12 @@
     }
 
     function buildOffer() {
-        const offerId = window.location.href.match(/\/offers\/(\d+)/)?.[1] || "unknown";
+        const opportunityPath = window.location.href.match(/\/(offers|rfqs)\/([^/?#]+)/i);
+        const offerId = opportunityPath
+            ? (opportunityPath[1].toLowerCase() === 'rfqs'
+                ? `rfq:${decodeURIComponent(opportunityPath[2])}`
+                : decodeURIComponent(opportunityPath[2]))
+            : "unknown";
 
         let jobId = null;
         const h1 = document.querySelector('h1');
@@ -1521,6 +1570,7 @@
     }
 
     setInterval(() => BackendUI.ensureButton(), 2000);
+    setInterval(() => BackendUI.checkScrapedStatus(), 30000);
     setInterval(() => refreshAgentGeo(), 5000);
     setInterval(() => refreshDosarStatus(), 7000);
     setInterval(() => ensureDosarTitleControls(), 3000);

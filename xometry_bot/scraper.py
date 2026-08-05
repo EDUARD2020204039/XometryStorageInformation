@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import base64
+from datetime import datetime, timezone
 
 import requests
 from playwright.sync_api import Page, Locator
@@ -199,8 +200,6 @@ def _build_offer_link(offer_id=None, job_id=None, prefer_job_id=False):
             return f"https://partner.xometry.eu/offers/{canonical_job_id}"
 
     if offer_id:
-        if is_gsh_job:
-            return f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
         return f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
 
     if canonical_job_id:
@@ -390,6 +389,7 @@ def _jobs_from_rfq_offers(offers):
         process = _join_unique(processes)
 
         link = f"https://partner.xometry.eu/rfqs/{_rfq_url_slug(job_id)}?source=rfqs" if job_id != "Unknown" else ""
+        rfq_slug = _rfq_url_slug(job_id) if job_id != "Unknown" else ""
 
         jobs.append({
             "id": job_id,
@@ -399,6 +399,7 @@ def _jobs_from_rfq_offers(offers):
             "material": material,
             "process": process,
             "link": link,
+            "offer_id": f"rfq:{rfq_slug}" if rfq_slug else None,
             "raw_text": "api:rfqOffers",
         })
     return jobs
@@ -896,7 +897,39 @@ def build_offer_payload(page: Page, job):
         "parts": parts,
         "parts_pricing": parts_pricing,
         "total_price": 0,
+        "analysis_status": "completed",
+        "analyzed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
+    return payload
+
+
+def build_minimal_offer_payload(job, reason=None):
+    offer_id = job.get("offer_id")
+    if not offer_id:
+        return None
+    if job.get("id", "").startswith("RFQ-"):
+        return None
+
+    title = job.get("id") or str(offer_id)
+    url = job.get("link") or _build_offer_link(offer_id=offer_id, job_id=title)
+    payload = {
+        "offer_id": str(offer_id),
+        "title": title,
+        "url": url,
+        "customer": "Xometry",
+        "remarks": "Analiza detaliata a esuat; oferta a fost salvata minimal din lista Xometry.",
+        "parts": [],
+        "parts_pricing": [],
+        "total_price": 0,
+        "scrape_status": "partial",
+        "analysis_status": "failed",
+        "analyzed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "first_seen_at": job.get("first_seen_at"),
+        "last_seen_at": job.get("last_seen_at"),
+        "seen_count": job.get("seen_count"),
+    }
+    if reason:
+        payload["analysis_error"] = str(reason)[:500]
     return payload
 
 
@@ -911,8 +944,18 @@ def build_backend_payloads(page: Page, jobs, skip_offer_ids=None, max_offers=Non
         if str(offer_id) in skip:
             continue
 
-        payload = build_offer_payload(page, job)
+        payload = None
+        try:
+            payload = build_offer_payload(page, job)
+        except Exception as e:
+            logger.exception(f"Offer detail analysis failed for {offer_id}; saving minimal offer payload")
+            payload = build_minimal_offer_payload(job, reason=e)
+        if not payload:
+            payload = build_minimal_offer_payload(job, reason="detail analysis returned no payload")
         if payload:
+            payload["first_seen_at"] = job.get("first_seen_at")
+            payload["last_seen_at"] = job.get("last_seen_at")
+            payload["seen_count"] = job.get("seen_count")
             payloads.append(payload)
 
         processed += 1

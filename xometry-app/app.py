@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from uuid import uuid4
 from typing import Dict, List, Optional
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, Request, Form, HTTPException, Depends, Body
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -207,6 +207,11 @@ manager = ConnectionManager()
 
 app = FastAPI(title="Xometry Offer Helper", version="1.0.0")
 
+
+@app.get("/health")
+def health_check():
+    return {"ok": True, "service": "xometry-storage-information"}
+
 # Configurare CORS pentru extensia Chrome
 app.add_middleware(
     CORSMiddleware,
@@ -278,6 +283,18 @@ def _safe_slug(text: str) -> str:
     return s[:80] if len(s) > 0 else 'reper'
 
 
+def _parse_scraper_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    except (TypeError, ValueError):
+        return None
+
+
 def _extract_canonical_offer_title(text: Optional[str]) -> Optional[str]:
     if not text:
         return None
@@ -321,9 +338,9 @@ def _normalize_xometry_offer_url(
     offer_id = str(offer_external_id or "").strip()
     title = str(normalized_title or "").strip().upper()
     if offer_id.isdigit() and title.startswith(("HJO-", "J-")):
-        return f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
+        return f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
     if offer_id.isdigit() and raw_url and re.search(r"/offers/(?:HJO|J)-", raw_url, re.IGNORECASE):
-        return f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
+        return f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
     return str(raw_url or "").strip()
 
 
@@ -993,26 +1010,49 @@ async def export_xlsx(offer_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Eroare internă")
 
 @app.get("/api/offers")
-async def get_offers(db: Session = Depends(get_db)):
+def get_offers(offer_id: Optional[str] = None, db: Session = Depends(get_db)):
     """API endpoint pentru obținerea ofertelor"""
     try:
-        offers = db.query(Offer).order_by(Offer.created_at.desc()).all()
+        query = db.query(Offer)
+        if offer_id:
+            query = query.filter(Offer.offer_id == offer_id)
+        offers = query.order_by(Offer.created_at.desc()).all()
         return [{
             'id': offer.id,
             'offer_id': offer.offer_id,
             'title': _normalize_offer_title(offer.title, offer.offer_id, offer.url),
             'customer': offer.customer,
             'url': _offer_xometry_url(offer),
+            'remarks': offer.remarks,
             'created_at': offer.created_at.isoformat(),
+            'first_seen_at': offer.first_seen_at.isoformat() if offer.first_seen_at else None,
+            'last_seen_at': offer.last_seen_at.isoformat() if offer.last_seen_at else None,
+            'analyzed_at': offer.analyzed_at.isoformat() if offer.analyzed_at else None,
+            'analysis_status': offer.analysis_status,
+            'seen_count': offer.seen_count or 1,
             'parts_count': len(offer.parts),
             'dosar_id': offer.dosar_id,
             'dosar_path': offer.dosar_path,
             'dosar_allocated': offer.dosar_allocated.isoformat() if offer.dosar_allocated else None,
             'has_dosar': bool(offer.dosar_id),
+            'parts': [{
+                'part_id': part.part_id,
+                'part_name': part.name,
+                'material': part.material,
+            } for part in offer.parts],
+            'part_names': [part.name for part in offer.parts if part.name],
+            'part_ids': [part.part_id for part in offer.parts if part.part_id],
         } for offer in offers]
     except Exception as e:
         logger.error(f"Eroare la obținerea ofertelor: {e}")
         raise HTTPException(status_code=500, detail="Eroare internă")
+
+
+@app.get("/api/offers/ids")
+def get_offer_ids(db: Session = Depends(get_db)):
+    """Lightweight offer identity endpoint used by the scraper."""
+    return [row[0] for row in db.query(Offer.offer_id).all() if row[0]]
+
 
 @app.get("/api/offer/{offer_id}/parts")
 async def get_offer_parts(offer_id: int, db: Session = Depends(get_db)):
@@ -1249,12 +1289,9 @@ async def update_part_remarks(part_id: int, request: Request, db: Session = Depe
         raise HTTPException(status_code=500, detail="Eroare internă")
 
 @app.post("/api/scrape")
-async def scrape_offer_from_extension(request: Request, db: Session = Depends(get_db)):
+def scrape_offer_from_extension(offer_data: Dict = Body(...), db: Session = Depends(get_db)):
     """API endpoint pentru primirea datelor de la extensia Chrome"""
-    offer_data = None
     try:
-        # Parsează datele JSON de la extensie
-        offer_data = await request.json()
         offer_external_id = offer_data.get("offer_id") if isinstance(offer_data, dict) else None
         offer_url = offer_data.get("url") if isinstance(offer_data, dict) else None
         normalized_title = _normalize_offer_title(
@@ -1263,6 +1300,14 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
             offer_url,
         )
         offer_url = _normalize_xometry_offer_url(offer_url, offer_external_id, normalized_title)
+        incoming_first_seen = _parse_scraper_datetime(offer_data.get("first_seen_at"))
+        incoming_last_seen = _parse_scraper_datetime(offer_data.get("last_seen_at"))
+        incoming_analyzed = _parse_scraper_datetime(offer_data.get("analyzed_at"))
+        incoming_analysis_status = str(offer_data.get("analysis_status") or "").strip() or None
+        try:
+            incoming_seen_count = max(1, int(offer_data.get("seen_count") or 1))
+        except (TypeError, ValueError):
+            incoming_seen_count = 1
         
         logger.info(f"Primit date de la extensie pentru oferta: {offer_external_id}")
 
@@ -1277,6 +1322,21 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
             existing_offer.title = normalized_title
             existing_offer.customer = offer_data.get('customer')
             existing_offer.url = offer_url
+            existing_offer.remarks = offer_data.get('remarks') or existing_offer.remarks
+            if incoming_first_seen and (
+                not existing_offer.first_seen_at or incoming_first_seen < existing_offer.first_seen_at
+            ):
+                existing_offer.first_seen_at = incoming_first_seen
+            if incoming_last_seen and (
+                not existing_offer.last_seen_at or incoming_last_seen > existing_offer.last_seen_at
+            ):
+                existing_offer.last_seen_at = incoming_last_seen
+            if incoming_analyzed and (
+                not existing_offer.analyzed_at or incoming_analyzed >= existing_offer.analyzed_at
+            ):
+                existing_offer.analyzed_at = incoming_analyzed
+                existing_offer.analysis_status = incoming_analysis_status
+            existing_offer.seen_count = max(existing_offer.seen_count or 1, incoming_seen_count)
             offer_id = existing_offer.id
         else:
             # Creează oferta nouă
@@ -1284,7 +1344,13 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
                 offer_id=offer_external_id,
                 url=offer_url,
                 title=normalized_title,
-                customer=offer_data.get('customer')
+                customer=offer_data.get('customer'),
+                remarks=offer_data.get('remarks'),
+                first_seen_at=incoming_first_seen or incoming_last_seen or datetime.utcnow(),
+                last_seen_at=incoming_last_seen or incoming_first_seen or datetime.utcnow(),
+                analyzed_at=incoming_analyzed,
+                analysis_status=incoming_analysis_status,
+                seen_count=incoming_seen_count,
             )
             db.add(offer)
             db.commit()
@@ -1397,6 +1463,68 @@ async def scrape_offer_from_extension(request: Request, db: Session = Depends(ge
         logger.exception("Eroare la salvarea ofertei. Payload keys=%s", payload_keys)
         db.rollback()
         raise HTTPException(status_code=500, detail="Eroare internă")
+
+@app.post("/api/scrape/discovery")
+async def update_scraper_discovery(request: Request, db: Session = Depends(get_db)):
+    """Persist lightweight discovery timestamps for every scraper scan."""
+    payload = await request.json()
+    jobs = payload.get("jobs") if isinstance(payload, dict) else None
+    if not isinstance(jobs, list):
+        raise HTTPException(status_code=400, detail="Payload invalid: jobs trebuie sa fie lista")
+
+    updated = 0
+    missing = 0
+    for item in jobs:
+        if not isinstance(item, dict):
+            continue
+        offer_id = str(item.get("offer_id") or "").strip()
+        if not offer_id:
+            continue
+        offer = db.query(Offer).filter(Offer.offer_id == offer_id).first()
+        if not offer:
+            job_id = str(item.get("job_id") or "").strip()
+            if not (offer_id.startswith("rfq:") or job_id.upper().startswith("RFQ-")):
+                missing += 1
+                continue
+            try:
+                initial_seen_count = max(1, int(item.get("seen_count") or 1))
+            except (TypeError, ValueError):
+                initial_seen_count = 1
+            rfq_slug = offer_id.split(":", 1)[1] if ":" in offer_id else job_id[4:]
+            raw_url = str(item.get("url") or "").strip()
+            offer = Offer(
+                offer_id=offer_id,
+                title=_normalize_offer_title(job_id, offer_id, raw_url),
+                customer="Xometry",
+                url=raw_url or f"https://partner.xometry.eu/rfqs/{rfq_slug}?source=rfqs",
+                first_seen_at=_parse_scraper_datetime(item.get("first_seen_at")) or datetime.utcnow(),
+                last_seen_at=_parse_scraper_datetime(item.get("last_seen_at")) or datetime.utcnow(),
+                analyzed_at=_parse_scraper_datetime(item.get("analyzed_at")),
+                analysis_status=str(item.get("analysis_status") or "").strip() or None,
+                seen_count=initial_seen_count,
+            )
+            db.add(offer)
+            updated += 1
+            continue
+        first_seen = _parse_scraper_datetime(item.get("first_seen_at"))
+        last_seen = _parse_scraper_datetime(item.get("last_seen_at"))
+        if first_seen and (not offer.first_seen_at or first_seen < offer.first_seen_at):
+            offer.first_seen_at = first_seen
+        if last_seen and (not offer.last_seen_at or last_seen > offer.last_seen_at):
+            offer.last_seen_at = last_seen
+        analyzed_at = _parse_scraper_datetime(item.get("analyzed_at"))
+        if analyzed_at and (not offer.analyzed_at or analyzed_at >= offer.analyzed_at):
+            offer.analyzed_at = analyzed_at
+            offer.analysis_status = str(item.get("analysis_status") or "").strip() or offer.analysis_status
+        try:
+            offer.seen_count = max(offer.seen_count or 1, int(item.get("seen_count") or 1))
+        except (TypeError, ValueError):
+            pass
+        updated += 1
+
+    db.commit()
+    return {"ok": True, "updated": updated, "missing": missing, "received": len(jobs)}
+
 
 @app.post("/api/orders/sync", response_model=Dict[str, str], tags=["Orders"])
 async def sync_orders(payload: OrderSyncRequest, db: Session = Depends(get_db)):

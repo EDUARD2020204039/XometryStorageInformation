@@ -474,8 +474,8 @@ async function downloadDocumentation(payload) {
 }
 
 async function checkOfferExists(offerId) {
-    const url = "/api/offers";
-    logToLocalServer(`Checking existence via list: ${url} for ${offerId}`);
+    const url = `/api/offers?offer_id=${encodeURIComponent(offerId)}`;
+    logToLocalServer(`Checking existence via exact lookup: ${url}`);
     try {
         const { resp } = await fetchBackend(url, {
             method: 'GET',
@@ -494,7 +494,16 @@ async function checkOfferExists(offerId) {
 
         if (match) {
             logToLocalServer(`Found match! XomID: ${offerId} -> IntID: ${match.id}`);
-            return { exists: true, internalId: match.id };
+            return {
+                exists: true,
+                internalId: match.id,
+                firstSeenAt: match.first_seen_at || match.created_at || null,
+                lastSeenAt: match.last_seen_at || null,
+                analyzedAt: match.analyzed_at || null,
+                analysisStatus: match.analysis_status || null,
+                seenCount: match.seen_count || 1,
+                title: match.title || null
+            };
         } else {
             logToLocalServer(`No match found for ${offerId}`);
             return { exists: false };

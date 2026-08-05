@@ -32,10 +32,7 @@ def send_to_backend(jobs):
         if job_id and str(job_id).startswith("RFQ-"):
             continue
         job_id_text = str(job_id or "")
-        if job_id_text.startswith(("HJO-", "J-")):
-            url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?gsh=true&source=jobs&locale=en"
-        else:
-            url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
+        url_fallback = f"https://partner.xometry.eu/offers/{offer_id}?source=jobs&locale=en"
         link = job.get("link")
         if _is_bad_gsh_link(link, job_id_text):
             link = ""
@@ -62,7 +59,7 @@ def fetch_existing_offer_ids():
     if not config.BACKEND_URL:
         return set()
 
-    url = f"{config.BACKEND_URL.rstrip('/')}/api/offers"
+    url = f"{config.BACKEND_URL.rstrip('/')}/api/offers/ids"
     headers = {}
     if config.BACKEND_API_KEY:
         headers["authorization"] = f"Bearer {config.BACKEND_API_KEY}"
@@ -71,7 +68,7 @@ def fetch_existing_offer_ids():
         if resp.status_code != 200:
             return set()
         data = resp.json() or []
-        return {str(o.get("offer_id")) for o in data if o.get("offer_id")}
+        return {str(offer_id) for offer_id in data if offer_id}
     except Exception:
         return set()
 
@@ -105,14 +102,52 @@ def mark_synced(offer_ids):
         pass
 
 
+def send_discovery_snapshot(jobs):
+    """Update first/last seen metadata without re-scraping offer details."""
+    if not config.BACKEND_ENABLED or not config.BACKEND_URL:
+        return False, "Backend disabled or missing URL"
+    items = []
+    for job in jobs:
+        if not job.get("offer_id"):
+            continue
+        items.append({
+            "offer_id": str(job.get("offer_id")),
+            "job_id": str(job.get("id") or job.get("job_id") or ""),
+            "job_type": str(job.get("type") or ""),
+            "url": str(job.get("link") or ""),
+            "first_seen_at": job.get("first_seen_at"),
+            "last_seen_at": job.get("last_seen_at"),
+            "analyzed_at": job.get("last_seen_at") if str(job.get("type") or "").upper() == "RFQ" else None,
+            "analysis_status": "summary" if str(job.get("type") or "").upper() == "RFQ" else None,
+            "seen_count": job.get("seen_count"),
+        })
+    if not items:
+        return True, None
+    headers = {"content-type": "application/json"}
+    if config.BACKEND_API_KEY:
+        headers["authorization"] = f"Bearer {config.BACKEND_API_KEY}"
+    try:
+        response = requests.post(
+            f"{config.BACKEND_URL.rstrip('/')}/api/scrape/discovery",
+            headers=headers,
+            json={"jobs": items},
+            timeout=20,
+        )
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        return True, response.json()
+    except Exception as exc:
+        return False, str(exc)
+
+
 def send_payloads(payloads):
     if not config.BACKEND_ENABLED:
-        return False, "Backend disabled"
+        return False, "Backend disabled", []
     if not config.BACKEND_URL:
-        return False, "Missing BACKEND_URL"
+        return False, "Missing BACKEND_URL", []
 
     if not payloads:
-        return True, None
+        return True, None, []
 
     url = f"{config.BACKEND_URL.rstrip('/')}/api/scrape"
     headers = {"content-type": "application/json"}
@@ -124,7 +159,7 @@ def send_payloads(payloads):
     failed = []
     for payload in payloads:
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            resp = requests.post(url, headers=headers, json=payload, timeout=config.BACKEND_OFFER_TIMEOUT)
             if resp.status_code != 200:
                 failed.append(f"{payload.get('offer_id')}: HTTP {resp.status_code}")
             else:

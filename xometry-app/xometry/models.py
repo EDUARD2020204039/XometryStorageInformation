@@ -24,6 +24,11 @@ class Offer(Base):
     dosar_path = Column(String(500), nullable=True)  # Calea către dosarul alocat
     dosar_allocated = Column(DateTime, nullable=True)  # Data alocării dosarului
     created_at = Column(DateTime, default=datetime.utcnow)
+    first_seen_at = Column(DateTime, nullable=True)
+    last_seen_at = Column(DateTime, nullable=True)
+    analyzed_at = Column(DateTime, nullable=True)
+    analysis_status = Column(String, nullable=True)
+    seen_count = Column(Integer, default=1)
     
     # Relație cu reperele
     parts = relationship("Part", back_populates="offer", cascade="all, delete-orphan")

@@ -37,6 +37,11 @@ def migrate_database() -> bool:
         add_column(cursor, "offers", "dosar_id", "VARCHAR")
         add_column(cursor, "offers", "dosar_path", "VARCHAR(500)")
         add_column(cursor, "offers", "dosar_allocated", "DATETIME")
+        add_column(cursor, "offers", "first_seen_at", "DATETIME")
+        add_column(cursor, "offers", "last_seen_at", "DATETIME")
+        add_column(cursor, "offers", "analyzed_at", "DATETIME")
+        add_column(cursor, "offers", "analysis_status", "VARCHAR")
+        add_column(cursor, "offers", "seen_count", "INTEGER DEFAULT 1")
 
         add_column(cursor, "parts", "local_image_path", "VARCHAR(500)")
         add_column(cursor, "parts", "processes", "JSON")
