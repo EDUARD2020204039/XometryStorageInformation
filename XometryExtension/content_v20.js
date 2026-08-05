@@ -1,7 +1,8 @@
-// Xometry Price Calculator Extension (v2.65)
+// Xometry Price Calculator Extension
 // Content Script v20 - Thickness Normalization
 
 (function () {
+    const EXTENSION_VERSION = chrome.runtime.getManifest().version;
     let latestAgentGeoStatus = null;
     let latestAgentGeoSource = null;
     let latestAgentGeoToastKey = null;
@@ -14,7 +15,7 @@
         try { chrome.runtime.sendMessage({ type: 'LOG', message: msg }); } catch (e) { }
     }
 
-    log("Extension v2.65 Loaded (content_v20.js)");
+    log(`Extension v${EXTENSION_VERSION} Loaded (content_v20.js)`);
 
     const DENSITIES = {
         'aluminium': 2.7, 'aluminum': 2.7, 'al-': 2.7, 'al ': 2.7, 'aw-': 2.7, '6082': 2.7, '7075': 2.8, '6061': 2.7,
@@ -51,6 +52,21 @@
         return match ? match[1] : '';
     }
 
+    function setGrandTotalPosition(box, left, top) {
+        const margin = 8;
+        const maxLeft = Math.max(margin, window.innerWidth - box.offsetWidth - margin);
+        const maxTop = Math.max(margin, window.innerHeight - box.offsetHeight - margin);
+        box.style.left = `${Math.min(Math.max(margin, left), maxLeft)}px`;
+        box.style.top = `${Math.min(Math.max(margin, top), maxTop)}px`;
+        box.style.right = 'auto';
+        box.style.bottom = 'auto';
+    }
+
+    function saveGrandTotalPosition(box) {
+        const rect = box.getBoundingClientRect();
+        localStorage.setItem('xom_gt_position', JSON.stringify({ left: rect.left, top: rect.top }));
+    }
+
     async function scanForCards() {
         if (!document.getElementById('xom-grand-total-box')) {
             const box = document.createElement('div');
@@ -59,8 +75,8 @@
 
             // Header with Minimize
             const header = `
-                <div class="xom-grand-total-label" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none;" title="Click to Minimize">
-                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v2.65</span></span>
+                <div class="xom-grand-total-label" title="Drag to move. Click to minimize.">
+                <span>GRAND TOTAL <span style="font-size:9px; opacity:0.5;">v${EXTENSION_VERSION}</span></span>
                 <span id="xom-minimize-icon" style="font-weight:bold; font-size:14px;">−</span>
             </div>
             `;
@@ -98,22 +114,79 @@
                     if (localStorage.getItem('xom_gt_minimized') === 'true') {
                         box.classList.add('xom-minimized');
                     }
+                    const savedPosition = JSON.parse(localStorage.getItem('xom_gt_position') || 'null');
+                    if (savedPosition && Number.isFinite(savedPosition.left) && Number.isFinite(savedPosition.top)) {
+                        setGrandTotalPosition(box, savedPosition.left, savedPosition.top);
+                    }
                 } catch (e) { }
 
-                // Minimize Action
-                label.onclick = (e) => {
+                let dragState = null;
+                let didDrag = false;
+
+                label.addEventListener('pointerdown', (e) => {
+                    if (e.button !== 0) return;
+                    const rect = box.getBoundingClientRect();
+                    dragState = {
+                        pointerId: e.pointerId,
+                        startX: e.clientX,
+                        startY: e.clientY,
+                        left: rect.left,
+                        top: rect.top
+                    };
+                    didDrag = false;
+                    label.setPointerCapture(e.pointerId);
+                    box.classList.add('xom-dragging');
+                });
+
+                label.addEventListener('pointermove', (e) => {
+                    if (!dragState || dragState.pointerId !== e.pointerId) return;
+                    const deltaX = e.clientX - dragState.startX;
+                    const deltaY = e.clientY - dragState.startY;
+                    if (!didDrag && Math.hypot(deltaX, deltaY) < 4) return;
+                    didDrag = true;
+                    setGrandTotalPosition(box, dragState.left + deltaX, dragState.top + deltaY);
+                });
+
+                const finishDrag = (e) => {
+                    if (!dragState || dragState.pointerId !== e.pointerId) return;
+                    if (label.hasPointerCapture(e.pointerId)) label.releasePointerCapture(e.pointerId);
+                    if (didDrag) saveGrandTotalPosition(box);
+                    dragState = null;
+                    box.classList.remove('xom-dragging');
+                };
+                label.addEventListener('pointerup', finishDrag);
+                label.addEventListener('pointercancel', finishDrag);
+
+                label.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    if (didDrag) {
+                        didDrag = false;
+                        return;
+                    }
                     box.classList.add('xom-minimized');
                     localStorage.setItem('xom_gt_minimized', 'true');
-                };
+                });
 
                 // Maximize Action (click anywhere on box when minimized, or specifically placeholder)
                 box.onclick = (e) => {
                     if (box.classList.contains('xom-minimized')) {
                         box.classList.remove('xom-minimized');
                         localStorage.setItem('xom_gt_minimized', 'false');
+                        requestAnimationFrame(() => {
+                            const rect = box.getBoundingClientRect();
+                            setGrandTotalPosition(box, rect.left, rect.top);
+                            saveGrandTotalPosition(box);
+                        });
                     }
                 };
+
+                window.addEventListener('resize', () => {
+                    if (box.style.left && box.style.top) {
+                        const rect = box.getBoundingClientRect();
+                        setGrandTotalPosition(box, rect.left, rect.top);
+                        saveGrandTotalPosition(box);
+                    }
+                });
 
                 const cab = document.getElementById('xom-copy-all-btn');
                 if (cab) {

@@ -1,6 +1,6 @@
 # Chrome Web Store publication
 
-Upload `XometryExtension-v2.67.zip` as a new Chrome Web Store item and select
+Upload the ZIP matching the current manifest version as a Chrome Web Store item and select
 **Unlisted** visibility. Users must install the store listing once; later
 published versions are delivered automatically by Chrome.
 
